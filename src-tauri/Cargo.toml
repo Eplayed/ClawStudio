@@ -1,0 +1,31 @@
+[package]
+name = "clawstudio"
+version = "0.1.0"
+edition = "2021"
+description = "ClawStudio - OpenClaw Visual Workstation"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-sql = { version = "2", features = ["sqlite"] }
+tauri-plugin-shell = "2"
+tauri-plugin-updater = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+futures-util = "0.3"
+keyring = "2"
+bollard = "0.16"               # Docker API client
+reqwest = { version = "0.11", features = ["json"] }  # HTTP client for Anthropic API
+base64 = "0.22"                # Base64 encoding for screenshots
+tokio-tungstenite = "0.21"     # WebSocket for VNC
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+log = "0.4"
+env_logger = "0.11"
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
