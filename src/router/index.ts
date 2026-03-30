@@ -58,6 +58,12 @@ const router = createRouter({
       meta: { title: '合规审计', icon: '📋' },
     },
     {
+      path: '/templates',
+      name: 'templates',
+      component: () => import('@/views/Templates.vue'),
+      meta: { title: '模板市场', icon: '🎯' },
+    },
+    {
       path: '/settings',
       name: 'settings',
       component: () => import('@/views/Settings.vue'),

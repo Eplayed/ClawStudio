@@ -12,6 +12,7 @@ const navItems = [
   { path: '/agents', name: 'agents', label: '特工列队', icon: '🤖', section: 'main', badge: true },
   { path: '/overwatch', name: 'overwatch', label: '监控舱', icon: '📺', section: 'main' },
   { path: '/cost', name: 'cost', label: '烧钱计算器', icon: '💰', section: 'main' },
+  { path: '/templates', name: 'templates', label: '模板市场', icon: '🎯', section: 'main' },
   { path: '/sandboxes', name: 'sandboxes', label: '沙盒环境', icon: '📦', section: 'system' },
   { path: '/traces', name: 'traces', label: '历史回放', icon: '⏱', section: 'system' },
   { path: '/audit', name: 'audit', label: '合规审计 🔐', icon: '📋', section: 'system', badge: 'EE' },

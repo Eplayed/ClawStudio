@@ -12,6 +12,7 @@ mod gateway;
 mod keychain;
 mod openclaw;
 mod setup;
+mod template;
 mod vnc_client;
 
 use tauri::Manager;
@@ -101,6 +102,15 @@ fn main() {
             audit::verify_audit_integrity,
             audit::get_cost_summary,
             audit::cleanup_old_audit_logs,
+            // Template Management (Phase 5)
+            template::export_template,
+            template::export_template_file,
+            template::import_template,
+            template::import_template_file,
+            template::generate_share_link,
+            template::validate_template,
+            template::list_builtin_templates,
+            template::get_builtin_template,
         ])
         // -- Setup hook --
         .setup(|app| {
