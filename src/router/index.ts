@@ -4,6 +4,12 @@ const router = createRouter({
   history: createWebHistory(),
   routes: [
     {
+      path: '/setup',
+      name: 'setup',
+      component: () => import('@/views/SetupWizard.vue'),
+      meta: { title: '安装向导', fullscreen: true },
+    },
+    {
       path: '/',
       name: 'dashboard',
       component: () => import('@/views/Dashboard.vue'),
@@ -44,6 +50,18 @@ const router = createRouter({
       name: 'traces',
       component: () => import('@/views/Traces.vue'),
       meta: { title: '历史回放', icon: '⏱' },
+    },
+    {
+      path: '/audit',
+      name: 'audit',
+      component: () => import('@/views/AuditTraces.vue'),
+      meta: { title: '合规审计', icon: '📋' },
+    },
+    {
+      path: '/templates',
+      name: 'templates',
+      component: () => import('@/views/Templates.vue'),
+      meta: { title: '模板市场', icon: '🎯' },
     },
     {
       path: '/settings',
