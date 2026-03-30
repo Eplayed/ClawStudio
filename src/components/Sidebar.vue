@@ -14,6 +14,7 @@ const navItems = [
   { path: '/cost', name: 'cost', label: '烧钱计算器', icon: '💰', section: 'main' },
   { path: '/sandboxes', name: 'sandboxes', label: '沙盒环境', icon: '📦', section: 'system' },
   { path: '/traces', name: 'traces', label: '历史回放', icon: '⏱', section: 'system' },
+  { path: '/audit', name: 'audit', label: '合规审计 🔐', icon: '📋', section: 'system', badge: 'EE' },
   { path: '/settings', name: 'settings', label: '系统设置', icon: '⚙', section: 'system' },
 ]
 

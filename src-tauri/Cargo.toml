@@ -18,13 +18,16 @@ tokio = { version = "1", features = ["full"] }
 futures-util = "0.3"
 keyring = "2"
 bollard = "0.16"               # Docker API client
-reqwest = { version = "0.11", features = ["json"] }  # HTTP client for Anthropic API
-base64 = "0.22"                # Base64 encoding for screenshots
+reqwest = { version = "0.11", features = ["json"] }  # HTTP client
+base64 = "0.22"                # Base64 encoding
 tokio-tungstenite = "0.21"     # WebSocket for VNC
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 log = "0.4"
 env_logger = "0.11"
+dirs = "5"                     # Cross-platform home directory
+async-trait = "0.1"            # Async trait support
+sha2 = "0.10"                  # SHA-256 for audit log hashing
 
 [features]
 default = ["custom-protocol"]
