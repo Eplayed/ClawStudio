@@ -4,6 +4,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod audit;
+mod channels;
 mod computer_use;
 mod db;
 mod docker;
@@ -18,7 +19,7 @@ mod vnc_client;
 use tauri::Manager;
 use gateway::GatewayState;
 use setup::SetupState;
-use audit::AuditState;
+use audit::AuditManager;
 use std::path::PathBuf;
 
 fn main() {
@@ -32,16 +33,14 @@ fn main() {
 
     tauri::Builder::default()
         // -- Plugins --
-        .plugin(tauri_plugin_sql::Builder::default().build())
         .plugin(tauri_plugin_shell::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
         // -- Managed State --
         .manage(openclaw::OpenClawManager::new())
         .manage(docker::DockerManager::new())
         .manage(computer_use::CURuntime::new())
         .manage(GatewayState::new())
         .manage(SetupState::new())
-        .manage(AuditState::new(data_dir.join("audit.db")))
+        .manage(AuditManager::new())
         // -- Commands --
         .invoke_handler(tauri::generate_handler![
             // Keychain
@@ -79,14 +78,15 @@ fn main() {
             db::save_agent_config,
             db::get_all_traces,
             db::save_trace,
-            // Setup Wizard (Phase 1)
+            // Setup Wizard
             setup::check_environment,
+            setup::get_env_status,
             setup::install_node,
             setup::install_openclaw,
             setup::configure_openclaw,
             setup::start_gateway_from_setup,
             setup::uninstall_openclaw,
-            // Gateway Manager (Phase 2)
+            // Gateway Manager
             gateway::start_gateway,
             gateway::stop_gateway,
             gateway::restart_gateway,
@@ -95,14 +95,22 @@ fn main() {
             gateway::gateway_logs,
             gateway::check_openclaw_update,
             gateway::upgrade_openclaw,
-            // Audit & Traces (Phase 4)
-            audit::log_audit_entry,
-            audit::get_audit_logs,
-            audit::export_audit_logs,
-            audit::verify_audit_integrity,
+            // Channel Management
+            channels::list_channels,
+            channels::add_channel,
+            channels::remove_channel,
+            channels::test_channel,
+            channels::restart_gateway_for_channels,
+            // Audit & Traces
+            audit::audit_log,
+            audit::audit_get_entries,
+            audit::audit_get_stats,
+            audit::audit_export,
+            audit::audit_cleanup,
             audit::get_cost_summary,
-            audit::cleanup_old_audit_logs,
-            // Template Management (Phase 5)
+            audit::export_audit_logs,
+            audit::get_audit_logs,
+            // Template Management
             template::export_template,
             template::export_template_file,
             template::import_template,
@@ -113,34 +121,9 @@ fn main() {
             template::get_builtin_template,
         ])
         // -- Setup hook --
-        .setup(|app| {
-            let window = app.get_webview_window("main").unwrap();
-            let app_handle = app.handle().clone();
-
-            // Initialize database tables on first launch
-            tauri::async_runtime::spawn(async move {
-                if let Err(e) = db::run_migrations(&app_handle).await {
-                    log::error!("Database migration failed: {}", e);
-                }
-            });
-
-            // Start heartbeat monitor for orphan OpenClaw processes
-            let window_clone = window.clone();
-            tauri::async_runtime::spawn(async move {
-                openclaw::check_orphan_processes(window_clone).await;
-            });
-
+        .setup(|_app| {
             log::info!("ClawStudio Nova v0.2 started");
             Ok(())
-        })
-        // -- Exit handler --
-        .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { .. } = event {
-                // Cleanup Gateway process on exit
-                let state = window.state::<GatewayState>();
-                gateway::cleanup_on_exit(&state);
-                log::info!("ClawStudio shutting down");
-            }
         })
         .run(tauri::generate_context!())
         .expect("error while running ClawStudio");

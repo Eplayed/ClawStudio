@@ -1,280 +1,298 @@
+<script setup lang="ts">
+import { ref, onMounted, onUnmounted } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
+
+const props = defineProps<{
+  compact?: boolean
+}>()
+
+interface GatewayHealth {
+  running: boolean
+  port: number
+  version: string
+  uptime_sec: number
+}
+
+const health = ref<GatewayHealth | null>(null)
+const loading = ref(true)
+const error = ref('')
+const showLogs = ref(false)
+const logs = ref<string[]>([])
+
+let pollInterval: number | null = null
+
+async function checkHealth() {
+  loading.value = true
+  try {
+    health.value = await invoke('gateway_health', { port: 18789 })
+    error.value = ''
+  } catch (e) {
+    health.value = { running: false, port: 18789, version: '', uptime_sec: 0 }
+    error.value = ''
+  } finally {
+    loading.value = false
+  }
+}
+
+async function startGateway() {
+  try {
+    await invoke('gateway_start', { port: 18789 })
+    await checkHealth()
+  } catch (e) {
+    error.value = `启动失败: ${e}`
+  }
+}
+
+async function stopGateway() {
+  try {
+    await invoke('gateway_stop')
+    await checkHealth()
+  } catch (e) {
+    error.value = `停止失败: ${e}`
+  }
+}
+
+async function restartGateway() {
+  try {
+    await invoke('gateway_restart', { port: 18789 })
+    await checkHealth()
+  } catch (e) {
+    error.value = `重启失败: ${e}`
+  }
+}
+
+async function viewLogs() {
+  try {
+    logs.value = await invoke('gateway_logs', { tail: 50 })
+    showLogs.value = true
+  } catch (e) {
+    logs.value = [`获取日志失败: ${e}`]
+  }
+}
+
+function formatUptime(sec: number): string {
+  if (sec < 60) return `${sec}秒`
+  if (sec < 3600) return `${Math.floor(sec / 60)}分`
+  if (sec < 86400) return `${Math.floor(sec / 3600)}小时`
+  return `${Math.floor(sec / 86400)}天`
+}
+
+onMounted(() => {
+  checkHealth()
+  // Poll every 10 seconds
+  pollInterval = window.setInterval(checkHealth, 10000)
+})
+
+onUnmounted(() => {
+  if (pollInterval) clearInterval(pollInterval)
+})
+</script>
+
 <template>
-  <div class="gateway-status-bar" :class="statusClass">
+  <div class="gateway-status-bar" :class="{ compact: props.compact }">
+    <!-- Status Indicator -->
     <div class="status-left">
-      <div class="status-icon">
-        <span v-if="loading" class="spinner">⏳</span>
-        <span v-else-if="running">🟢</span>
-        <span v-else>🔴</span>
-      </div>
+      <div class="logo">🦞</div>
       <div class="status-info">
-        <span class="status-label">OpenClaw {{ version || 'v?.?.?' }}</span>
-        <span class="status-text">
-          Gateway: {{ running ? `Running on port ${port}` : 'Stopped' }}
-        </span>
+        <span class="version">OpenClaw {{ health?.version || '...' }}</span>
+        <span v-if="!props.compact" class="divider">|</span>
+        <span v-if="!props.compact" class="port">端口: {{ health?.port || 18789 }}</span>
       </div>
     </div>
-    
+
+    <!-- Status & Actions -->
     <div class="status-center">
-      <span v-if="uptime" class="uptime">↑ {{ formatUptime(uptime) }}</span>
+      <div class="status-badge" :class="{ running: health?.running }">
+        <span class="dot"></span>
+        {{ health?.running ? '运行中' : '已停止' }}
+      </div>
+      
+      <span v-if="health?.running && !props.compact" class="uptime">
+        ↑ {{ formatUptime(health.uptime_sec) }}
+      </span>
     </div>
-    
-    <div class="status-right">
-      <button v-if="!running" @click="start" class="btn-action start" :disabled="loading">
-        {{ loading ? 'Starting...' : 'Start' }}
+
+    <!-- Action Buttons -->
+    <div class="status-actions">
+      <button 
+        v-if="!health?.running"
+        class="btn btn-success btn-sm"
+        @click="startGateway"
+      >
+        启动
       </button>
-      <button v-else @click="restart" class="btn-action restart" :disabled="loading">
-        Restart
-      </button>
-      <button v-if="running" @click="stop" class="btn-action stop" :disabled="loading">
-        Stop
-      </button>
-      <button @click="showLogs" class="btn-action logs">
-        Logs
+      
+      <template v-else>
+        <button 
+          v-if="!props.compact"
+          class="btn btn-secondary btn-sm"
+          @click="restartGateway"
+        >
+          重启
+        </button>
+        <button 
+          class="btn btn-danger btn-sm"
+          @click="stopGateway"
+        >
+          停止
+        </button>
+      </template>
+      
+      <button 
+        v-if="!props.compact && health?.running"
+        class="btn btn-ghost btn-sm"
+        @click="viewLogs"
+      >
+        日志
       </button>
     </div>
-    
+
     <!-- Logs Modal -->
-    <div v-if="logsVisible" class="logs-modal">
+    <div v-if="showLogs" class="logs-modal" @click.self="showLogs = false">
       <div class="logs-content">
         <div class="logs-header">
-          <h3>Gateway Logs</h3>
-          <button @click="logsVisible = false" class="btn-close">×</button>
+          <h3>Gateway 日志</h3>
+          <button class="close-btn" @click="showLogs = false">×</button>
         </div>
         <div class="logs-body">
           <div v-for="(log, i) in logs" :key="i" class="log-line">{{ log }}</div>
-          <div v-if="logs.length === 0" class="log-empty">No logs available</div>
-        </div>
-        <div class="logs-footer">
-          <button @click="refreshLogs" class="btn-refresh">Refresh</button>
         </div>
       </div>
     </div>
   </div>
 </template>
 
-<script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { invoke } from '@tauri-apps/api/core'
-
-const running = ref(false)
-const loading = ref(false)
-const port = ref(18789)
-const uptime = ref<number | null>(null)
-const version = ref('')
-const logs = ref<string[]>([])
-const logsVisible = ref(false)
-
-let pollInterval: number | null = null
-
-const statusClass = computed(() => ({
-  'status-running': running.value,
-  'status-stopped': !running.value,
-  'status-loading': loading.value,
-}))
-
-onMounted(async () => {
-  await fetchStatus()
-  // Poll every 5 seconds
-  pollInterval = window.setInterval(fetchStatus, 5000)
-})
-
-onUnmounted(() => {
-  if (pollInterval) {
-    clearInterval(pollInterval)
-  }
-})
-
-async function fetchStatus() {
-  try {
-    const status = await invoke<any>('gateway_status')
-    running.value = status.running
-    port.value = status.port
-    uptime.value = status.uptime_secs
-    version.value = status.version || ''
-  } catch (error) {
-    console.error('Failed to fetch gateway status:', error)
-    running.value = false
-  }
-}
-
-async function start() {
-  loading.value = true
-  try {
-    await invoke('start_gateway', { port: port.value })
-    await fetchStatus()
-  } catch (error) {
-    console.error('Failed to start gateway:', error)
-  } finally {
-    loading.value = false
-  }
-}
-
-async function stop() {
-  loading.value = true
-  try {
-    await invoke('stop_gateway')
-    await fetchStatus()
-  } catch (error) {
-    console.error('Failed to stop gateway:', error)
-  } finally {
-    loading.value = false
-  }
-}
-
-async function restart() {
-  loading.value = true
-  try {
-    await invoke('restart_gateway')
-    await fetchStatus()
-  } catch (error) {
-    console.error('Failed to restart gateway:', error)
-  } finally {
-    loading.value = false
-  }
-}
-
-async function showLogs() {
-  logsVisible.value = true
-  await refreshLogs()
-}
-
-async function refreshLogs() {
-  try {
-    logs.value = await invoke('gateway_logs', { tail: 100 })
-  } catch (error) {
-    console.error('Failed to fetch logs:', error)
-    logs.value = ['Failed to load logs']
-  }
-}
-
-function formatUptime(secs: number): string {
-  if (secs < 60) return `${secs}s`
-  if (secs < 3600) return `${Math.floor(secs / 60)}m ${secs % 60}s`
-  const hours = Math.floor(secs / 3600)
-  const mins = Math.floor((secs % 3600) / 60)
-  return `${hours}h ${mins}m`
-}
-</script>
-
 <style scoped>
 .gateway-status-bar {
   display: flex;
   align-items: center;
-  gap: 1.5rem;
-  padding: 0.75rem 1.25rem;
-  background: rgba(255, 255, 255, 0.05);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-  font-size: 0.875rem;
+  justify-content: space-between;
+  padding: 12px 20px;
+  background: var(--bg-card);
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
 }
 
-.status-running {
-  border-left: 3px solid #22c55e;
-}
-
-.status-stopped {
-  border-left: 3px solid #ef4444;
+.gateway-status-bar.compact {
+  padding: 8px 12px;
 }
 
 .status-left {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: 12px;
 }
 
-.status-icon {
-  font-size: 1rem;
-}
-
-.spinner {
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+.logo {
+  font-size: 24px;
 }
 
 .status-info {
   display: flex;
-  flex-direction: column;
-  gap: 0.125rem;
+  align-items: center;
+  gap: 8px;
 }
 
-.status-label {
-  font-weight: 500;
-  color: #e0e0e0;
+.version {
+  font-weight: 600;
+  font-size: 14px;
 }
 
-.status-text {
-  font-size: 0.75rem;
-  color: #888;
+.divider {
+  color: var(--text-secondary);
+}
+
+.port {
+  color: var(--text-secondary);
+  font-size: 13px;
 }
 
 .status-center {
-  flex: 1;
   display: flex;
-  justify-content: center;
+  align-items: center;
+  gap: 12px;
+}
+
+.status-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  background: rgba(239, 68, 68, 0.1);
+  border-radius: 12px;
+  font-size: 13px;
+  color: var(--red);
+}
+
+.status-badge.running {
+  background: rgba(34, 197, 94, 0.1);
+  color: var(--green);
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
 }
 
 .uptime {
-  padding: 0.25rem 0.75rem;
-  background: rgba(34, 197, 94, 0.1);
-  border-radius: 4px;
-  color: #22c55e;
-  font-size: 0.75rem;
+  font-size: 12px;
+  color: var(--text-secondary);
 }
 
-.status-right {
+.status-actions {
   display: flex;
-  gap: 0.5rem;
+  gap: 8px;
 }
 
-.btn-action {
-  padding: 0.5rem 1rem;
-  border: none;
+.btn {
+  padding: 6px 12px;
   border-radius: 6px;
-  font-size: 0.75rem;
+  font-size: 13px;
   font-weight: 500;
   cursor: pointer;
+  border: none;
   transition: all 0.2s;
 }
 
-.btn-action.start {
-  background: #22c55e;
+.btn-sm {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.btn-success {
+  background: var(--green);
   color: white;
 }
 
-.btn-action.start:hover:not(:disabled) {
-  background: #16a34a;
+.btn-danger {
+  background: var(--red);
+  color: white;
 }
 
-.btn-action.restart {
-  background: rgba(234, 179, 8, 0.2);
-  color: #eab308;
-  border: 1px solid rgba(234, 179, 8, 0.3);
+.btn-secondary {
+  background: var(--bg-base);
+  color: var(--text-primary);
 }
 
-.btn-action.stop {
-  background: rgba(239, 68, 68, 0.2);
-  color: #ef4444;
-  border: 1px solid rgba(239, 68, 68, 0.3);
+.btn-ghost {
+  background: transparent;
+  color: var(--text-secondary);
 }
 
-.btn-action.logs {
-  background: rgba(59, 130, 246, 0.2);
-  color: #3b82f6;
-  border: 1px solid rgba(59, 130, 246, 0.3);
+.btn:hover {
+  filter: brightness(1.1);
 }
 
-.btn-action:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
+/* Logs Modal */
 .logs-modal {
   position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.8);
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -282,70 +300,47 @@ function formatUptime(secs: number): string {
 }
 
 .logs-content {
-  background: #1a1a2e;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--bg-base);
   border-radius: 12px;
   width: 80%;
   max-width: 800px;
-  max-height: 80vh;
-  display: flex;
-  flex-direction: column;
+  max-height: 70vh;
+  overflow: hidden;
 }
 
 .logs-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 1rem 1.5rem;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-color);
 }
 
 .logs-header h3 {
   margin: 0;
-  font-size: 1rem;
 }
 
-.btn-close {
+.close-btn {
   background: none;
   border: none;
-  color: #888;
-  font-size: 1.5rem;
+  font-size: 24px;
   cursor: pointer;
+  color: var(--text-secondary);
 }
 
 .logs-body {
-  flex: 1;
+  padding: 16px;
+  max-height: 500px;
   overflow-y: auto;
-  padding: 1rem;
-  background: rgba(0, 0, 0, 0.3);
   font-family: monospace;
-  font-size: 0.75rem;
+  font-size: 12px;
+  background: var(--bg-deep);
 }
 
 .log-line {
-  padding: 0.25rem 0;
-  color: #888;
-  white-space: pre-wrap;
-  word-break: break-all;
-}
-
-.log-empty {
-  color: #666;
-  text-align: center;
-  padding: 2rem;
-}
-
-.logs-footer {
-  padding: 0.75rem 1.5rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.btn-refresh {
-  padding: 0.5rem 1rem;
-  background: rgba(59, 130, 246, 0.2);
-  border: 1px solid rgba(59, 130, 246, 0.3);
-  border-radius: 6px;
-  color: #3b82f6;
-  cursor: pointer;
+  padding: 2px 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 </style>

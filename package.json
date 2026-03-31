@@ -12,6 +12,7 @@
   "dependencies": {
     "@novnc/novnc": "^1.6.0",
     "@tauri-apps/api": "^2.0.0",
+    "@tauri-apps/plugin-dialog": "^2.6.0",
     "@tauri-apps/plugin-sql": "^2.0.0",
     "pinia": "^2.1.7",
     "vue": "^3.4.0",

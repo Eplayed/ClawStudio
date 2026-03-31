@@ -19,6 +19,7 @@ export interface AgentTemplate {
   temperature?: number
   budget_limit?: number
   screenshot?: string
+  verified?: boolean
 }
 
 export interface TemplateMeta {

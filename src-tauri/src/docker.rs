@@ -162,7 +162,7 @@ pub async fn create_sandbox(
         .create_container(
             Some(CreateContainerOptions {
                 name: &container_name,
-                ..Default::default()
+                platform: None,
             }),
             config,
         )

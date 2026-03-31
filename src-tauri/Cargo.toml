@@ -28,6 +28,10 @@ env_logger = "0.11"
 dirs = "5"                     # Cross-platform home directory
 async-trait = "0.1"            # Async trait support
 sha2 = "0.10"                  # SHA-256 for audit log hashing
+which = "6"                    # Detect command paths
+regex = "1"                    # Regex parsing
+rusqlite = { version = "0.31", features = ["bundled"] }  # Local audit database
+csv = "1"                      # CSV export
 
 [features]
 default = ["custom-protocol"]

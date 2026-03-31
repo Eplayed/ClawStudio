@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useSettingsStore } from '@/stores/settings'
+import ChannelManager from '@/components/ChannelManager.vue'
+import UninstallDialog from '@/components/UninstallDialog.vue'
 
 const settings = useSettingsStore()
 
@@ -34,6 +36,11 @@ async function saveAll() {
   } catch (e) {
     console.error('Failed to save settings:', e)
   }
+}
+
+function handleUninstallComplete() {
+  // Redirect to setup or refresh
+  window.location.reload()
 }
 </script>
 
@@ -143,6 +150,16 @@ async function saveAll() {
             <input type="text" v-model="settings.fileWhitelist" />
           </div>
           <button class="btn-save" @click="saveAll">💾 保存全部设置</button>
+        </div>
+
+        <!-- Channel Manager -->
+        <div class="settings-card full">
+          <ChannelManager />
+        </div>
+
+        <!-- Danger Zone - Uninstall -->
+        <div class="settings-card full">
+          <UninstallDialog @uninstall-complete="handleUninstallComplete" />
         </div>
       </div>
     </div>

@@ -176,7 +176,7 @@ pub async fn get_agent_status(
 }
 
 /// Check for orphan OpenClaw processes on startup
-pub async fn check_orphan_processes(window: tauri::Window) {
+pub async fn check_orphan_processes(window: tauri::WebviewWindow) {
     let pid_dir = std::path::Path::new("/tmp");
     if let Ok(entries) = std::fs::read_dir(pid_dir) {
         for entry in entries.flatten() {

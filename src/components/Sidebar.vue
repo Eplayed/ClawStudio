@@ -8,6 +8,7 @@ const router = useRouter()
 const agentStore = useAgentStore()
 
 const navItems = [
+  { path: '/setup', name: 'setup', label: '安装向导 🚀', icon: '🚀', section: 'main' },
   { path: '/', name: 'dashboard', label: '仪表盘', icon: '📊', section: 'main' },
   { path: '/agents', name: 'agents', label: '特工列队', icon: '🤖', section: 'main', badge: true },
   { path: '/overwatch', name: 'overwatch', label: '监控舱', icon: '📺', section: 'main' },

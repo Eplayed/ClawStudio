@@ -238,7 +238,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
@@ -309,7 +309,7 @@ const installProgress = ref({
 
 // Listen for setup-progress events
 onMounted(async () => {
-  const unlisten = await listen('setup-progress', (event) => {
+  await listen('setup-progress', (event) => {
     installProgress.value = event.payload as any
   })
   

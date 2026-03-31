@@ -28,7 +28,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis", "msi", "dmg", "appimage", "deb"],
+    "targets": "all",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -41,32 +41,8 @@
     "shortDescription": "AI Agent Visual Control Center",
     "longDescription": "ClawStudio Nova - A professional desktop application for monitoring and controlling AI agents with real-time visualization, VNC streaming, and cost tracking.",
     "category": "DeveloperTool",
-    "windows": {
-      "nsis": {
-        "installerIcon": "icons/icon.ico",
-        "headerImage": "icons/header.bmp",
-        "sidebarImage": "icons/sidebar.bmp",
-        "license": "../LICENSE",
-        "installMode": "currentUser"
-      }
-    },
     "macOS": {
       "minimumSystemVersion": "10.13"
-    }
-  },
-  "plugins": {
-    "sql": {
-      "preload": {
-        "db": "sqlite:clawstudio.db"
-      }
-    },
-    "updater": {
-      "active": true,
-      "endpoints": [
-        "https://github.com/clawstudio/nova/releases/latest/download/latest.json"
-      ],
-      "dialog": true,
-      "pubkey": ""
     }
   }
 }

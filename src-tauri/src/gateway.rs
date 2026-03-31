@@ -1,37 +1,41 @@
-// gateway.rs - OpenClaw Gateway Daemon Manager
-// Implements Phase 2 of ClawStudio v2.0 roadmap
-// Manages Gateway lifecycle with proper cleanup on app exit
+// gateway.rs - Gateway lifecycle management
+// Manages OpenClaw Gateway daemon: start/stop/restart/health/logs
 
-use std::process::{Child, Command, Stdio};
+use serde::{Deserialize, Serialize};
+use std::process::Command as StdCommand;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager};
 
 // ─── Data Models ───
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GatewayStatus {
+pub struct GatewayHealth {
     pub running: bool,
     pub port: u16,
-    pub pid: Option<u32>,
-    pub uptime_secs: Option<u64>,
-    pub version: Option<String>,
+    pub version: String,
+    pub uptime_sec: u64,
+    pub connected_clients: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GatewayHealth {
-    pub healthy: bool,
-    pub response_time_ms: u64,
-    pub active_connections: Option<u32>,
+pub struct GatewayInfo {
+    pub version: String,
+    pub config_path: String,
+    pub log_path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateInfo {
+    pub current_version: String,
+    pub latest_version: String,
+    pub update_available: bool,
 }
 
 // ─── Gateway State ───
 
 pub struct GatewayState {
-    pub process: Arc<Mutex<Option<Child>>>,
+    pub process: Arc<Mutex<Option<std::process::Child>>>,
     pub port: Arc<Mutex<u16>>,
-    pub start_time: Arc<Mutex<Option<std::time::Instant>>>,
 }
 
 impl GatewayState {
@@ -39,310 +43,385 @@ impl GatewayState {
         Self {
             process: Arc::new(Mutex::new(None)),
             port: Arc::new(Mutex::new(18789)),
-            start_time: Arc::new(Mutex::new(None)),
         }
+    }
+}
+
+impl Default for GatewayState {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
 // ─── Tauri Commands ───
 
+/// Start the Gateway daemon
 #[tauri::command]
 pub async fn start_gateway(
-    port: u16,
     state: tauri::State<'_, GatewayState>,
-) -> Result<GatewayStatus, String> {
-    log::info!("Starting OpenClaw Gateway on port {}", port);
-    
-    let mut process_guard = state.process.lock().await;
-    let mut port_guard = state.port.lock().await;
-    let mut start_time_guard = state.start_time.lock().await;
-    
+    port: Option<u16>,
+) -> Result<GatewayHealth, String> {
+    let port = port.unwrap_or(18789);
+
     // Check if already running
-    if process_guard.is_some() {
-        return Err("Gateway is already running".to_string());
-    }
-    
-    // Check if port is available
-    if is_port_in_use(port).await {
-        return Err(format!("Port {} is already in use", port));
-    }
-    
-    // Start the Gateway process
-    let child = Command::new("openclaw")
-        .args(["gateway", "start", "--port", &port.to_string()])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("Failed to start Gateway: {}", e))?;
-    
-    let pid = child.id();
-    *process_guard = Some(child);
-    *port_guard = port;
-    *start_time_guard = Some(std::time::Instant::now());
-    
-    log::info!("Gateway started with PID {}", pid);
-    
-    // Wait for health check to pass
-    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-    
-    for _ in 0..10 {
-        if check_health(port).await?.healthy {
-            log::info!("Gateway is healthy on port {}", port);
-            return Ok(GatewayStatus {
-                running: true,
-                port,
-                pid: Some(pid),
-                uptime_secs: Some(0),
-                version: get_openclaw_version().await.ok(),
-            });
+    if let Ok(health) = check_health(port).await {
+        if health.running {
+            return Ok(health);
         }
-        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
     }
-    
-    Err("Gateway started but health check failed".to_string())
+
+    log::info!("Starting Gateway on port {}...", port);
+
+    // Start gateway as background process
+    #[cfg(unix)]
+    let child = StdCommand::new("openclaw")
+        .args(["gateway", "start", "--port", &port.to_string()])
+        .spawn()
+        .map_err(|e| format!("Failed to start gateway: {}", e))?;
+
+    #[cfg(windows)]
+    let child = StdCommand::new("cmd")
+        .args(["/C", "openclaw", "gateway", "start", "--port", &port.to_string()])
+        .spawn()
+        .map_err(|e| format!("Failed to start gateway: {}", e))?;
+
+    // Store process handle
+    *state.process.lock().await = Some(child);
+    *state.port.lock().await = port;
+
+    // Wait for gateway to be ready
+    for i in 0..30 {
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+        if let Ok(health) = check_health(port).await {
+            if health.running {
+                log::info!("Gateway started successfully on port {}", port);
+                return Ok(health);
+            }
+        }
+
+        log::debug!("Waiting for gateway to start... ({}/30)", i + 1);
+    }
+
+    Err("Gateway failed to start within 15 seconds".to_string())
 }
 
+/// Stop the Gateway daemon
 #[tauri::command]
 pub async fn stop_gateway(
     state: tauri::State<'_, GatewayState>,
 ) -> Result<(), String> {
-    log::info!("Stopping OpenClaw Gateway");
-    
-    let mut process_guard = state.process.lock().await;
-    let mut start_time_guard = state.start_time.lock().await;
-    
-    if let Some(mut child) = process_guard.take() {
-        // Try graceful shutdown first
-        let _ = run_gateway_command(&["gateway", "stop"]);
-        
-        // Wait a bit for graceful shutdown
-        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-        
-        // Force kill if still running
-        match child.try_wait() {
-            Ok(Some(_)) => {
-                log::info!("Gateway stopped gracefully");
-            }
-            Ok(None) => {
-                log::warn!("Gateway didn't stop gracefully, killing...");
-                child.kill().map_err(|e| format!("Failed to kill Gateway: {}", e))?;
-            }
-            Err(e) => {
-                log::error!("Error checking Gateway status: {}", e);
-            }
+    log::info!("Stopping Gateway...");
+
+    // Kill stored process if any
+    if let Some(mut child) = state.process.lock().await.take() {
+        let _ = child.kill();
+    }
+
+    // Also run the CLI command to ensure complete stop
+    let output = StdCommand::new("openclaw")
+        .args(["gateway", "stop"])
+        .output();
+
+    match output {
+        Ok(o) if o.status.success() => {
+            log::info!("Gateway stopped successfully");
+            Ok(())
+        }
+        Ok(o) => {
+            let stderr = String::from_utf8_lossy(&o.stderr);
+            log::warn!("Gateway stop returned: {}", stderr);
+            Ok(()) // Still consider it stopped
+        }
+        Err(e) => {
+            log::error!("Failed to stop gateway: {}", e);
+            Err(format!("Failed to stop gateway: {}", e))
         }
     }
-    
-    *start_time_guard = None;
-    log::info!("Gateway stopped");
-    
-    Ok(())
 }
 
+/// Restart the Gateway daemon
 #[tauri::command]
 pub async fn restart_gateway(
     state: tauri::State<'_, GatewayState>,
-) -> Result<GatewayStatus, String> {
-    log::info!("Restarting OpenClaw Gateway");
-    
-    // Stop first
+    port: Option<u16>,
+) -> Result<GatewayHealth, String> {
+    log::info!("Restarting Gateway...");
+
     stop_gateway(state.clone()).await?;
-    
-    // Wait a moment
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-    
-    // Get the current port
-    let port = *state.port.lock().await;
-    
-    // Start again
-    start_gateway(port, state).await
+    start_gateway(state, port).await
 }
 
+/// Check Gateway health via HTTP
 #[tauri::command]
-pub async fn gateway_health(
-    state: tauri::State<'_, GatewayState>,
-) -> Result<GatewayHealth, String> {
-    let port = *state.port.lock().await;
+pub async fn gateway_health(port: Option<u16>) -> Result<GatewayHealth, String> {
+    let port = port.unwrap_or(18789);
     check_health(port).await
 }
 
+async fn check_health(port: u16) -> Result<GatewayHealth, String> {
+    let url = format!("http://127.0.0.1:{}/healthz", port);
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(2))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let response = client
+        .get(&url)
+        .send()
+        .await;
+
+    match response {
+        Ok(resp) if resp.status().is_success() => {
+            let body = resp.text().await.unwrap_or_default();
+
+            // Parse health response
+            Ok(GatewayHealth {
+                running: true,
+                port,
+                version: extract_version(&body).unwrap_or_default(),
+                uptime_sec: extract_uptime(&body).unwrap_or(0),
+                connected_clients: 0,
+            })
+        }
+        Ok(resp) => {
+            Err(format!("Gateway unhealthy: HTTP {}", resp.status()))
+        }
+        Err(_) => {
+            Ok(GatewayHealth {
+                running: false,
+                port,
+                version: String::new(),
+                uptime_sec: 0,
+                connected_clients: 0,
+            })
+        }
+    }
+}
+
+/// Get recent Gateway logs
 #[tauri::command]
-pub async fn gateway_status(
-    state: tauri::State<'_, GatewayState>,
-) -> Result<GatewayStatus, String> {
-    let process_guard = state.process.lock().await;
-    let port_guard = state.port.lock().await;
-    let start_time_guard = state.start_time.lock().await;
-    
-    let running = process_guard.is_some();
-    let pid = process_guard.as_ref().map(|c| c.id());
-    let uptime_secs = start_time_guard.map(|t| t.elapsed().as_secs());
-    
-    Ok(GatewayStatus {
-        running,
-        port: *port_guard,
-        pid,
-        uptime_secs,
-        version: if running { get_openclaw_version().await.ok() } else { None },
+pub async fn gateway_logs(tail: Option<usize>) -> Result<Vec<String>, String> {
+    let tail = tail.unwrap_or(200);
+
+    // Try to read from log file
+    if let Some(home) = dirs::home_dir() {
+        let log_path = home.join(".openclaw").join("logs").join("gateway.log");
+
+        if log_path.exists() {
+            let content = std::fs::read_to_string(&log_path)
+                .map_err(|e| format!("Failed to read log: {}", e))?;
+
+            let lines: Vec<String> = content
+                .lines()
+                .rev()
+                .take(tail)
+                .map(String::from)
+                .collect();
+
+            return Ok(lines.into_iter().rev().collect());
+        }
+    }
+
+    // Fallback: try CLI command
+    let output = StdCommand::new("openclaw")
+        .args(["gateway", "logs", "--tail", &tail.to_string()])
+        .output();
+
+    match output {
+        Ok(o) if o.status.success() => {
+            let logs = String::from_utf8_lossy(&o.stdout);
+            Ok(logs.lines().map(String::from).collect())
+        }
+        _ => Err("Failed to get logs".to_string()),
+    }
+}
+
+/// Get OpenClaw version
+#[tauri::command]
+pub fn get_openclaw_version() -> Result<String, String> {
+    let output = StdCommand::new("openclaw")
+        .arg("--version")
+        .output();
+
+    match output {
+        Ok(o) if o.status.success() => {
+            Ok(String::from_utf8_lossy(&o.stdout).trim().to_string())
+        }
+        Ok(_) => Err("OpenClaw not installed".to_string()),
+        Err(_) => Err("OpenClaw command not found".to_string()),
+    }
+}
+
+/// Get Gateway info
+#[tauri::command]
+pub fn get_gateway_info() -> Result<GatewayInfo, String> {
+    let version = get_openclaw_version()?;
+
+    let config_path = dirs::home_dir()
+        .map(|h| h.join(".openclaw").join("openclaw.json"))
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
+
+    let log_path = dirs::home_dir()
+        .map(|h| h.join(".openclaw").join("logs"))
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
+
+    Ok(GatewayInfo {
+        version,
+        config_path,
+        log_path,
     })
 }
 
+/// Check for OpenClaw updates
 #[tauri::command]
-pub async fn gateway_logs(tail: usize) -> Result<Vec<String>, String> {
-    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
-    let log_file = home.join(".openclaw/logs/gateway.log");
-    
-    if !log_file.exists() {
-        return Ok(vec!["No logs found".to_string()]);
-    }
-    
-    // Read last N lines
-    let content = std::fs::read_to_string(&log_file)
-        .map_err(|e| format!("Failed to read log file: {}", e))?;
-    
-    let lines: Vec<String> = content
-        .lines()
-        .rev()
-        .take(tail)
-        .rev()
-        .map(|s| s.to_string())
-        .collect();
-    
-    Ok(lines)
+pub async fn check_openclaw_update() -> Result<UpdateInfo, String> {
+    // Get current version
+    let current = get_openclaw_version()?;
+
+    // Get latest version from npm
+    let output = StdCommand::new("npm")
+        .args(["view", "openclaw", "version"])
+        .output();
+
+    let latest = match output {
+        Ok(o) if o.status.success() => {
+            String::from_utf8_lossy(&o.stdout).trim().to_string()
+        }
+        _ => {
+            // Try with registry
+            let output = StdCommand::new("npm")
+                .args(["view", "openclaw", "version", "--registry=https://registry.npmjs.org"])
+                .output();
+
+            String::from_utf8_lossy(&output.ok().unwrap().stdout).trim().to_string()
+        }
+    };
+
+    let update_available = current != latest && !latest.is_empty();
+
+    Ok(UpdateInfo {
+        current_version: current,
+        latest_version: latest,
+        update_available,
+    })
 }
 
+/// Upgrade OpenClaw
 #[tauri::command]
-pub async fn check_openclaw_update() -> Result<Option<String>, String> {
-    let current = get_openclaw_version().await?;
-    let latest = get_latest_openclaw_version().await?;
-    
-    if current != latest {
-        Ok(Some(latest))
+pub async fn upgrade_openclaw(
+    _app: tauri::AppHandle,
+    use_mirror: bool,
+) -> Result<(), String> {
+    let args = if use_mirror {
+        vec!["update", "-g", "openclaw", "--registry=https://registry.npmmirror.com"]
     } else {
-        Ok(None)
+        vec!["update", "-g", "openclaw"]
+    };
+
+    let output = StdCommand::new("npm").args(&args).output();
+
+    match output {
+        Ok(o) if o.status.success() => {
+            log::info!("OpenClaw upgraded successfully");
+            Ok(())
+        }
+        Ok(o) => Err(format!("Upgrade failed: {}", String::from_utf8_lossy(&o.stderr))),
+        Err(e) => Err(format!("Failed to run npm update: {}", e)),
     }
 }
 
+/// Get OpenClaw configuration
 #[tauri::command]
-pub async fn upgrade_openclaw(window: tauri::Window) -> Result<(), String> {
-    log::info!("Upgrading OpenClaw...");
-    
-    // Emit progress
-    let _ = window.emit("upgrade-progress", serde_json::json!({
-        "step": "upgrade",
-        "percent": 0,
-        "message": "Starting upgrade..."
-    }));
-    
-    let output = Command::new("npm")
-        .args(["update", "-g", "openclaw"])
-        .output()
-        .map_err(|e| format!("Failed to upgrade OpenClaw: {}", e))?;
-    
-    if output.status.success() {
-        let _ = window.emit("upgrade-progress", serde_json::json!({
-            "step": "upgrade",
-            "percent": 100,
-            "message": "Upgrade complete!"
-        }));
-        Ok(())
-    } else {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        Err(format!("Upgrade failed: {}", stderr))
+pub fn get_openclaw_config() -> Result<serde_json::Value, String> {
+    let config_path = dirs::home_dir()
+        .map(|h| h.join(".openclaw").join("openclaw.json"))
+        .ok_or("Cannot determine home directory")?;
+
+    if !config_path.exists() {
+        return Ok(serde_json::json!({}));
     }
+
+    let content = std::fs::read_to_string(&config_path)
+        .map_err(|e| format!("Failed to read config: {}", e))?;
+
+    serde_json::from_str(&content).map_err(|e| format!("Failed to parse config: {}", e))
+}
+
+/// Set OpenClaw configuration
+#[tauri::command]
+pub fn set_openclaw_config(config: serde_json::Value) -> Result<(), String> {
+    let config_path = dirs::home_dir()
+        .map(|h| h.join(".openclaw").join("openclaw.json"))
+        .ok_or("Cannot determine home directory")?;
+
+    // Create directory if needed
+    if let Some(parent) = config_path.parent() {
+        std::fs::create_dir_all(parent).ok();
+    }
+
+    let content = serde_json::to_string_pretty(&config)
+        .map_err(|e| format!("Failed to serialize config: {}", e))?;
+
+    std::fs::write(&config_path, content)
+        .map_err(|e| format!("Failed to write config: {}", e))?;
+
+    log::info!("OpenClaw config updated");
+    Ok(())
 }
 
 // ─── Helper Functions ───
 
-async fn check_health(port: u16) -> Result<GatewayHealth, String> {
-    let url = format!("http://127.0.0.1:{}/healthz", port);
-    
-    let start = std::time::Instant::now();
-    
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(5))
-        .build()
-        .map_err(|e| e.to_string())?;
-    
-    match client.get(&url).send().await {
-        Ok(resp) => {
-            let response_time_ms = start.elapsed().as_millis() as u64;
-            
-            if resp.status().is_success() {
-                // Try to parse active connections from response
-                let active_connections = resp.json::<serde_json::Value>().await
-                    .ok()
-                    .and_then(|v| v.get("activeConnections")?.as_u64() as Option<u32>);
-                
-                Ok(GatewayHealth {
-                    healthy: true,
-                    response_time_ms,
-                    active_connections,
-                })
-            } else {
-                Ok(GatewayHealth {
-                    healthy: false,
-                    response_time_ms,
-                    active_connections: None,
-                })
-            }
-        }
-        Err(_) => Ok(GatewayHealth {
-            healthy: false,
-            response_time_ms: 0,
-            active_connections: None,
-        }),
-    }
-}
-
-async fn is_port_in_use(port: u16) -> bool {
-    use std::net::TcpStream;
-    
-    TcpStream::connect(format!("127.0.0.1:{}", port)).is_ok()
-}
-
-async fn get_openclaw_version() -> Result<String, String> {
-    let output = Command::new("openclaw")
-        .arg("--version")
-        .output()
-        .map_err(|e| format!("Failed to get OpenClaw version: {}", e))?;
-    
-    if output.status.success() {
-        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+fn extract_version(body: &str) -> Option<String> {
+    // Try to parse JSON response
+    if let Ok(json) = serde_json::from_str::<serde_json::Value>(body) {
+        json.get("version")?.as_str().map(String::from)
     } else {
-        Err("Failed to get version".to_string())
+        // Try regex for plain text
+        let re = regex::Regex::new(r"version[:\s]+([^\s]+)").ok()?;
+        let caps = re.captures(body)?;
+        Some(caps.get(1)?.as_str().to_string())
     }
 }
 
-async fn get_latest_openclaw_version() -> Result<String, String> {
-    let output = Command::new("npm")
-        .args(["view", "openclaw", "version"])
-        .output()
-        .map_err(|e| format!("Failed to check latest version: {}", e))?;
-    
-    if output.status.success() {
-        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+fn extract_uptime(body: &str) -> Option<u64> {
+    if let Ok(json) = serde_json::from_str::<serde_json::Value>(body) {
+        json.get("uptime_sec")?.as_u64()
     } else {
-        Err("Failed to get latest version".to_string())
+        let re = regex::Regex::new(r"uptime[:\s]+(\d+)").ok()?;
+        let caps = re.captures(body)?;
+        caps.get(1)?.as_str().parse().ok()
     }
 }
 
-fn run_gateway_command(args: &[&str]) -> Result<std::process::Output, String> {
-    Command::new("openclaw")
-        .args(args)
-        .output()
-        .map_err(|e| format!("Failed to run openclaw command: {}", e))
+// ─── Additional Tauri Commands ───
+
+/// Get Gateway status (alias for gateway_health with more details)
+#[tauri::command]
+pub async fn gateway_status(port: Option<u16>) -> Result<serde_json::Value, String> {
+    let health = gateway_health(port).await?;
+    let info = get_gateway_info().ok();
+    
+    Ok(serde_json::json!({
+        "health": health,
+        "info": info,
+    }))
 }
 
-// ─── Cleanup on Exit ───
-
+/// Cleanup Gateway process on app exit
 pub fn cleanup_on_exit(state: &GatewayState) {
-    // This is called synchronously from the Tauri exit handler
-    // We need to use try_lock to avoid blocking
-    if let Ok(mut process_guard) = state.process.try_lock() {
-        if let Some(mut child) = process_guard.take() {
-            log::info!("Cleaning up Gateway process on exit");
-            let _ = child.kill();
+    // Try to stop the gateway
+    let output = std::process::Command::new("openclaw")
+        .args(["gateway", "stop"])
+        .output();
+    
+    if let Ok(o) = output {
+        if o.status.success() {
+            log::info!("Gateway stopped on exit");
         }
     }
 }

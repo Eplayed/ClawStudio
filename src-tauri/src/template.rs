@@ -11,7 +11,7 @@ use std::path::PathBuf;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentTemplate {
-    pub schema: String,              // "claw-template/v1"
+    pub schema: String,
     pub name: String,
     pub description: String,
     pub author: String,
@@ -21,14 +21,16 @@ pub struct AgentTemplate {
     pub model: String,
     pub computer_use: bool,
     pub sandbox_image: Option<String>,
-    pub hitl_level: String,          // "browse" | "standard" | "auto"
+    pub hitl_level: String,
     pub tags: Vec<String>,
-    pub channels: Vec<String>,       // Enabled channels
+    pub channels: Vec<String>,
     pub max_tokens: Option<u32>,
     pub temperature: Option<f32>,
     pub budget_limit: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub screenshot: Option<String>,   // Base64 preview image
+    pub screenshot: Option<String>,
+    #[serde(default)]
+    pub verified: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -81,16 +83,13 @@ pub fn export_template(
         temperature,
         budget_limit,
         screenshot: None,
+        verified: false,
     };
     
-    // Serialize to JSON
     let json = serde_json::to_string_pretty(&template)
         .map_err(|e| format!("Failed to serialize template: {}", e))?;
     
-    // Encode to Base64
     let encoded = general_purpose::STANDARD.encode(json.as_bytes());
-    
-    // Create deep link
     let deep_link = format!("claw://template/{}", encoded);
     
     Ok(deep_link)
@@ -120,12 +119,9 @@ pub fn export_template_file(
 }
 
 #[tauri::command]
-pub fn import_template(
-    data: String,
-) -> Result<AgentTemplate, String> {
+pub fn import_template(data: String) -> Result<AgentTemplate, String> {
     log::info!("Importing template from data");
     
-    // Check if it's a deep link
     let json_str = if data.starts_with("claw://template/") {
         let encoded = data.strip_prefix("claw://template/").unwrap();
         let decoded = general_purpose::STANDARD
@@ -134,10 +130,8 @@ pub fn import_template(
         String::from_utf8(decoded)
             .map_err(|e| format!("Failed to decode UTF-8: {}", e))?
     } else if data.starts_with("{") {
-        // Raw JSON
         data
     } else {
-        // Assume base64 encoded
         let decoded = general_purpose::STANDARD
             .decode(&data)
             .map_err(|e| format!("Failed to decode base64: {}", e))?;
@@ -145,11 +139,9 @@ pub fn import_template(
             .map_err(|e| format!("Failed to decode UTF-8: {}", e))?
     };
     
-    // Parse JSON
     let template: AgentTemplate = serde_json::from_str(&json_str)
         .map_err(|e| format!("Failed to parse template: {}", e))?;
     
-    // Validate schema
     if template.schema != "claw-template/v1" {
         return Err(format!("Unsupported template schema: {}", template.schema));
     }
@@ -158,15 +150,12 @@ pub fn import_template(
 }
 
 #[tauri::command]
-pub fn import_template_file(
-    path: String,
-) -> Result<AgentTemplate, String> {
+pub fn import_template_file(path: String) -> Result<AgentTemplate, String> {
     log::info!("Importing template from file: {}", path);
     
     let content = std::fs::read_to_string(&path)
         .map_err(|e| format!("Failed to read file: {}", e))?;
     
-    // Check if it's base64 encoded
     let json_str = if content.starts_with("{") {
         content
     } else {
@@ -188,9 +177,7 @@ pub fn import_template_file(
 }
 
 #[tauri::command]
-pub fn generate_share_link(
-    template: AgentTemplate,
-) -> Result<String, String> {
+pub fn generate_share_link(template: AgentTemplate) -> Result<String, String> {
     log::info!("Generating share link for template: {}", template.name);
     
     let json = serde_json::to_string(&template)
@@ -202,14 +189,11 @@ pub fn generate_share_link(
 }
 
 #[tauri::command]
-pub fn validate_template(
-    template: AgentTemplate,
-) -> Result<Vec<String>, String> {
+pub fn validate_template(template: AgentTemplate) -> Result<Vec<String>, String> {
     log::info!("Validating template: {}", template.name);
     
     let mut warnings = Vec::new();
     
-    // Check required fields
     if template.system_prompt.is_empty() {
         warnings.push("System prompt is empty".to_string());
     }
@@ -218,12 +202,10 @@ pub fn validate_template(
         warnings.push("Model is not specified".to_string());
     }
     
-    // Check HITL level
     if !["browse", "standard", "auto"].contains(&template.hitl_level.as_str()) {
         warnings.push(format!("Unknown HITL level: {}", template.hitl_level));
     }
     
-    // Check sandbox for computer use
     if template.computer_use && template.sandbox_image.is_none() {
         warnings.push("Computer use enabled but no sandbox image specified".to_string());
     }
@@ -253,6 +235,7 @@ pub fn get_builtin_templates() -> Vec<AgentTemplate> {
             temperature: Some(0.7),
             budget_limit: Some(5.0),
             screenshot: None,
+            verified: true,
         },
         AgentTemplate {
             schema: "claw-template/v1".to_string(),
@@ -272,6 +255,7 @@ pub fn get_builtin_templates() -> Vec<AgentTemplate> {
             temperature: Some(0.3),
             budget_limit: Some(10.0),
             screenshot: None,
+            verified: true,
         },
         AgentTemplate {
             schema: "claw-template/v1".to_string(),
@@ -291,6 +275,7 @@ pub fn get_builtin_templates() -> Vec<AgentTemplate> {
             temperature: Some(0.5),
             budget_limit: Some(5.0),
             screenshot: None,
+            verified: true,
         },
     ]
 }

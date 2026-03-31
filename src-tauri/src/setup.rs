@@ -1,436 +1,321 @@
-// setup.rs - Environment Detection and Installation Engine
-// Implements Phase 1 of ClawStudio v2.0 roadmap
+// setup.rs - Environment detection and installation management
+// Simplified version without window event emissions
 
-use std::process::Command;
-use std::sync::Arc;
-use tauri::{Manager, Window, Emitter};
 use serde::{Deserialize, Serialize};
-use tokio::sync::Mutex;
+use std::process::Command as StdCommand;
 
 // ─── Data Models ───
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EnvStatus {
-    pub node_installed: bool,
-    pub node_version: Option<String>,
-    pub npm_installed: bool,
-    pub npm_version: Option<String>,
-    pub openclaw_installed: bool,
-    pub openclaw_version: Option<String>,
-    pub gateway_running: bool,
-    pub gateway_port: Option<u16>,
+pub struct NodeInfo {
+    pub installed: bool,
+    pub version: String,
+    pub path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct InstallProgress {
-    pub step: String,
-    pub percent: u32,
-    pub message: String,
-    pub log_line: Option<String>,
+pub struct OpenClawInfo {
+    pub installed: bool,
+    pub version: String,
+    pub path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GatewayStatus {
+    pub running: bool,
+    pub port: u16,
+    pub uptime_sec: u64,
+    pub pid: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EnvStatus {
+    pub node: NodeInfo,
+    pub npm: NodeInfo,
+    pub openclaw: OpenClawInfo,
+    pub gateway: Option<GatewayStatus>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SetupConfig {
-    pub api_provider: String,
+    pub auth_provider: String,
     pub api_key: String,
     pub default_model: String,
     pub gateway_port: u16,
-    pub use_mirror: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UninstallScope {
+    pub stop_gateway: bool,
+    pub remove_cli: bool,
+    pub remove_config: bool,
+    pub remove_node: bool,
+}
+
+// ─── Detection Functions ───
+
+#[tauri::command]
+pub fn detect_node() -> Result<NodeInfo, String> {
+    let output = StdCommand::new("node").arg("--version").output();
+
+    match output {
+        Ok(o) if o.status.success() => {
+            let version = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            let path = which::which("node").ok().map(|p| p.to_string_lossy().to_string());
+            Ok(NodeInfo {
+                installed: true,
+                version: version.trim_start_matches('v').to_string(),
+                path,
+            })
+        }
+        _ => Ok(NodeInfo {
+            installed: false,
+            version: String::new(),
+            path: None,
+        }),
+    }
+}
+
+#[tauri::command]
+pub fn detect_npm() -> Result<NodeInfo, String> {
+    let output = StdCommand::new("npm").arg("--version").output();
+
+    match output {
+        Ok(o) if o.status.success() => {
+            let version = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            let path = which::which("npm").ok().map(|p| p.to_string_lossy().to_string());
+            Ok(NodeInfo { installed: true, version, path })
+        }
+        _ => Ok(NodeInfo { installed: false, version: String::new(), path: None }),
+    }
+}
+
+#[tauri::command]
+pub fn detect_openclaw() -> Result<OpenClawInfo, String> {
+    let output = StdCommand::new("openclaw").arg("--version").output();
+
+    match output {
+        Ok(o) if o.status.success() => {
+            let version = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            let path = which::which("openclaw").ok().map(|p| p.to_string_lossy().to_string());
+            Ok(OpenClawInfo { installed: true, version, path })
+        }
+        _ => Ok(OpenClawInfo { installed: false, version: String::new(), path: None }),
+    }
+}
+
+#[tauri::command]
+pub async fn detect_gateway_status() -> Result<Option<GatewayStatus>, String> {
+    let output = StdCommand::new("openclaw").args(["gateway", "status"]).output();
+
+    match output {
+        Ok(o) if o.status.success() => {
+            let stdout = String::from_utf8_lossy(&o.stdout);
+            let running = stdout.contains("running");
+            let port = extract_port(&stdout).unwrap_or(18789);
+            let pid = extract_pid(&stdout);
+            Ok(Some(GatewayStatus { running, port, uptime_sec: 0, pid }))
+        }
+        _ => Ok(None),
+    }
+}
+
+#[tauri::command]
+pub async fn get_env_status() -> Result<EnvStatus, String> {
+    let node = detect_node()?;
+    let npm = detect_npm()?;
+    let openclaw = detect_openclaw()?;
+    let gateway = detect_gateway_status().await?;
+    Ok(EnvStatus { node, npm, openclaw, gateway })
+}
+
+// ─── Installation Functions ───
+
+#[tauri::command]
+pub async fn install_node(_use_mirror: bool) -> Result<String, String> {
+    log::info!("Installing Node.js...");
+
+    #[cfg(target_os = "macos")]
+    {
+        let brew_check = StdCommand::new("which").arg("brew").output();
+        let has_brew = brew_check.map(|o| o.status.success()).unwrap_or(false);
+
+        if has_brew {
+            let output = StdCommand::new("brew")
+                .args(["install", "node@22"])
+                .output();
+
+            match output {
+                Ok(o) if o.status.success() => return Ok("Node.js installed via Homebrew".to_string()),
+                Ok(o) => return Err(String::from_utf8_lossy(&o.stderr).to_string()),
+                Err(e) => return Err(format!("Failed to run brew: {}", e)),
+            }
+        } else {
+            return Err("Homebrew not found. Please install Node.js manually from https://nodejs.org".to_string());
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let output = StdCommand::new("winget")
+            .args(["install", "OpenJS.NodeJS.LTS", "--accept-source-agreements", "--accept-package-agreements"])
+            .output();
+
+        match output {
+            Ok(o) if o.status.success() => return Ok("Node.js installed via winget".to_string()),
+            Ok(o) => return Err(String::from_utf8_lossy(&o.stderr).to_string()),
+            Err(e) => return Err(format!("Failed to run winget: {}. Please install Node.js manually", e)),
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let output = StdCommand::new("sh")
+            .arg("-c")
+            .arg("curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt-get install -y nodejs")
+            .output();
+
+        match output {
+            Ok(o) if o.status.success() => return Ok("Node.js installed".to_string()),
+            Ok(o) => return Err(String::from_utf8_lossy(&o.stderr).to_string()),
+            Err(e) => return Err(format!("Failed: {}. Please install Node.js manually", e)),
+        }
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    {
+        Err("Unsupported platform. Please install Node.js manually".to_string())
+    }
+}
+
+#[tauri::command]
+pub async fn install_openclaw(use_mirror: bool) -> Result<String, String> {
+    log::info!("Installing OpenClaw...");
+
+    let args = if use_mirror {
+        vec!["install", "-g", "openclaw@latest", "--registry=https://registry.npmmirror.com"]
+    } else {
+        vec!["install", "-g", "openclaw@latest"]
+    };
+
+    let output = StdCommand::new("npm").args(&args).output();
+
+    match output {
+        Ok(o) if o.status.success() => Ok("OpenClaw installed successfully".to_string()),
+        Ok(o) => Err(String::from_utf8_lossy(&o.stderr).to_string()),
+        Err(e) => Err(format!("Failed to run npm: {}", e)),
+    }
+}
+
+#[tauri::command]
+pub async fn configure_openclaw(config: SetupConfig) -> Result<String, String> {
+    log::info!("Configuring OpenClaw...");
+
+    // Save API key to keychain
+    let entry = keyring::Entry::new("clawstudio", &config.auth_provider)
+        .map_err(|e| e.to_string())?;
+    entry.set_password(&config.api_key).map_err(|e| e.to_string())?;
+
+    Ok("Configuration saved".to_string())
+}
+
+#[tauri::command]
+pub async fn uninstall_openclaw(scope: UninstallScope) -> Result<String, String> {
+    log::info!("Uninstalling OpenClaw...");
+
+    if scope.stop_gateway {
+        let _ = StdCommand::new("openclaw").args(["gateway", "stop"]).output();
+        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+    }
+
+    if scope.remove_config {
+        let _ = StdCommand::new("openclaw").args(["uninstall", "--all", "--yes"]).output();
+        if let Some(home) = dirs::home_dir() {
+            let openclaw_dir = home.join(".openclaw");
+            if openclaw_dir.exists() {
+                let _ = std::fs::remove_dir_all(&openclaw_dir);
+            }
+        }
+    }
+
+    if scope.remove_cli {
+        let _ = StdCommand::new("npm").args(["uninstall", "-g", "openclaw"]).output();
+    }
+
+    Ok("Uninstallation complete".to_string())
+}
+
+#[tauri::command]
+pub async fn check_environment() -> Result<EnvStatus, String> {
+    get_env_status().await
+}
+
+#[tauri::command]
+pub async fn start_gateway_from_setup(port: Option<u16>) -> Result<String, String> {
+    let port = port.unwrap_or(18789);
+    let output = StdCommand::new("openclaw")
+        .args(["gateway", "start", "--port", &port.to_string()])
+        .output();
+
+    match output {
+        Ok(o) if o.status.success() => Ok(format!("Gateway started on port {}", port)),
+        Ok(o) => Err(String::from_utf8_lossy(&o.stderr).to_string()),
+        Err(e) => Err(format!("Failed to start gateway: {}", e)),
+    }
 }
 
 // ─── Setup State ───
 
+use std::sync::Arc;
+use tokio::sync::Mutex;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InstallProgress {
+    pub step: String,
+    pub percent: u8,
+    pub message: String,
+    pub log_line: String,
+    pub success: bool,
+}
+
 pub struct SetupState {
-    pub env_status: Arc<Mutex<EnvStatus>>,
+    pub current_step: Arc<Mutex<u8>>,
+    pub install_progress: Arc<Mutex<InstallProgress>>,
 }
 
 impl SetupState {
     pub fn new() -> Self {
         Self {
-            env_status: Arc::new(Mutex::new(EnvStatus {
-                node_installed: false,
-                node_version: None,
-                npm_installed: false,
-                npm_version: None,
-                openclaw_installed: false,
-                openclaw_version: None,
-                gateway_running: false,
-                gateway_port: None,
+            current_step: Arc::new(Mutex::new(0)),
+            install_progress: Arc::new(Mutex::new(InstallProgress {
+                step: String::new(),
+                percent: 0,
+                message: String::new(),
+                log_line: String::new(),
+                success: true,
             })),
         }
     }
 }
 
-// ─── Tauri Commands ───
-
-#[tauri::command]
-pub async fn check_environment() -> Result<EnvStatus, String> {
-    log::info!("Checking environment...");
-    
-    let mut status = EnvStatus {
-        node_installed: false,
-        node_version: None,
-        npm_installed: false,
-        npm_version: None,
-        openclaw_installed: false,
-        openclaw_version: None,
-        gateway_running: false,
-        gateway_port: None,
-    };
-    
-    // Check Node.js
-    if let Ok(output) = run_command("node", &["--version"]) {
-        if output.status.success() {
-            status.node_installed = true;
-            status.node_version = Some(String::from_utf8_lossy(&output.stdout).trim().to_string());
-            log::info!("Node.js found: {:?}", status.node_version);
-        }
+impl Default for SetupState {
+    fn default() -> Self {
+        Self::new()
     }
-    
-    // Check npm
-    if let Ok(output) = run_command("npm", &["--version"]) {
-        if output.status.success() {
-            status.npm_installed = true;
-            status.npm_version = Some(String::from_utf8_lossy(&output.stdout).trim().to_string());
-            log::info!("npm found: {:?}", status.npm_version);
-        }
-    }
-    
-    // Check OpenClaw
-    if let Ok(output) = run_command("openclaw", &["--version"]) {
-        if output.status.success() {
-            status.openclaw_installed = true;
-            status.openclaw_version = Some(String::from_utf8_lossy(&output.stdout).trim().to_string());
-            log::info!("OpenClaw found: {:?}", status.openclaw_version);
-        }
-    }
-    
-    // Check Gateway health
-    if let Ok(running) = check_gateway_health(18789).await {
-        status.gateway_running = running;
-        status.gateway_port = if running { Some(18789) } else { None };
-    }
-    
-    Ok(status)
-}
-
-#[tauri::command]
-pub async fn install_node(window: Window) -> Result<(), String> {
-    log::info!("Starting Node.js installation...");
-    
-    emit_progress(&window, "install_node", 0, "Starting Node.js installation...", None);
-    
-    #[cfg(target_os = "windows")]
-    {
-        // Windows: Use winget or download .msi
-        emit_progress(&window, "install_node", 10, "Downloading Node.js installer...", None);
-        
-        // Try winget first
-        let result = run_command_with_progress(
-            &window,
-            "winget",
-            &["install", "OpenJS.NodeJS.LTS", "-e", "--silent"],
-            "install_node",
-        ).await;
-        
-        match result {
-            Ok(_) => {
-                emit_progress(&window, "install_node", 100, "Node.js installed successfully!", None);
-                return Ok(());
-            }
-            Err(e) => {
-                emit_progress(&window, "install_node", 20, &format!("Winget failed: {}, trying alternate method...", e), None);
-                // Fallback: Download .msi manually
-            }
-        }
-    }
-    
-    #[cfg(target_os = "macos")]
-    {
-        emit_progress(&window, "install_node", 10, "Installing via Homebrew...", None);
-        
-        let result = run_command_with_progress(
-            &window,
-            "brew",
-            &["install", "node@22"],
-            "install_node",
-        ).await;
-        
-        match result {
-            Ok(_) => {
-                emit_progress(&window, "install_node", 100, "Node.js installed successfully!", None);
-                return Ok(());
-            }
-            Err(e) => {
-                emit_progress(&window, "install_node", 50, &format!("Homebrew failed: {}", e), None);
-            }
-        }
-    }
-    
-    #[cfg(target_os = "linux")]
-    {
-        emit_progress(&window, "install_node", 10, "Installing via NodeSource...", None);
-        
-        // Use NodeSource setup script
-        let script = "curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt-get install -y nodejs";
-        let result = run_command_with_progress(
-            &window,
-            "bash",
-            &["-c", script],
-            "install_node",
-        ).await;
-        
-        match result {
-            Ok(_) => {
-                emit_progress(&window, "install_node", 100, "Node.js installed successfully!", None);
-                return Ok(());
-            }
-            Err(e) => {
-                return Err(format!("Failed to install Node.js: {}", e));
-            }
-        }
-    }
-    
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn install_openclaw(window: Window, use_mirror: bool) -> Result<(), String> {
-    log::info!("Starting OpenClaw installation (mirror: {})", use_mirror);
-    
-    emit_progress(&window, "install_openclaw", 0, "Starting OpenClaw installation...", None);
-    
-    let mut args = vec!["install", "-g", "openclaw@latest"];
-    
-    if use_mirror {
-        args.push("--registry=https://registry.npmmirror.com");
-        emit_progress(&window, "install_openclaw", 5, "Using China mirror for faster download...", None);
-    }
-    
-    emit_progress(&window, "install_openclaw", 10, "Running npm install...", None);
-    
-    let result = run_command_with_progress(
-        &window,
-        "npm",
-        &args,
-        "install_openclaw",
-    ).await;
-    
-    match result {
-        Ok(_) => {
-            emit_progress(&window, "install_openclaw", 100, "OpenClaw installed successfully!", None);
-            Ok(())
-        }
-        Err(e) => {
-            emit_progress(&window, "install_openclaw", 0, &format!("Installation failed: {}", e), None);
-            Err(format!("Failed to install OpenClaw: {}", e))
-        }
-    }
-}
-
-#[tauri::command]
-pub async fn configure_openclaw(config: SetupConfig, window: Window) -> Result<(), String> {
-    log::info!("Configuring OpenClaw with provider: {}", config.api_provider);
-    
-    emit_progress(&window, "configure", 0, "Configuring OpenClaw...", None);
-    
-    // Run openclaw onboard in non-interactive mode
-    let args = vec![
-        "onboard",
-        "--non-interactive",
-        "--auth-choice", &config.api_provider,
-        "--secret-input-mode", "plaintext",
-    ];
-    
-    emit_progress(&window, "configure", 50, "Running onboard process...", None);
-    
-    // Note: In production, we'd pipe the API key to stdin
-    // For now, we'll write the config directly
-    let config_dir = dirs::home_dir()
-        .ok_or("Cannot find home directory")?
-        .join(".openclaw");
-    
-    std::fs::create_dir_all(&config_dir).map_err(|e| e.to_string())?;
-    
-    let config_file = config_dir.join("openclaw.json");
-    let config_json = serde_json::json!({
-        "agents": {
-            "defaults": {
-                "model": config.default_model,
-            }
-        },
-        "gateway": {
-            "port": config.gateway_port
-        }
-    });
-    
-    std::fs::write(&config_file, serde_json::to_string_pretty(&config_json).unwrap())
-        .map_err(|e| e.to_string())?;
-    
-    emit_progress(&window, "configure", 100, "Configuration saved!", None);
-    
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn start_gateway_from_setup(window: Window, port: u16) -> Result<(), String> {
-    log::info!("Starting OpenClaw Gateway on port {}", port);
-    
-    emit_progress(&window, "start_gateway", 0, "Starting Gateway...", None);
-    
-    let args = vec!["gateway", "start", "--port", &port.to_string()];
-    
-    let result = run_command("openclaw", &args)?;
-    
-    if result.status.success() {
-        // Wait for gateway to be healthy
-        emit_progress(&window, "start_gateway", 50, "Waiting for Gateway to be ready...", None);
-        
-        for i in 0..10 {
-            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-            if check_gateway_health(port).await? {
-                emit_progress(&window, "start_gateway", 100, "Gateway started successfully!", None);
-                return Ok(());
-            }
-            emit_progress(&window, "start_gateway", 50 + (i * 5) as u32, "Waiting for Gateway...", None);
-        }
-        
-        Err("Gateway failed to start within 10 seconds".to_string())
-    } else {
-        let stderr = String::from_utf8_lossy(&result.stderr);
-        Err(format!("Failed to start Gateway: {}", stderr))
-    }
-}
-
-#[tauri::command]
-pub async fn uninstall_openclaw(window: Window, remove_data: bool, remove_node: bool) -> Result<(), String> {
-    log::info!("Uninstalling OpenClaw (remove_data: {}, remove_node: {})", remove_data, remove_node);
-    
-    emit_progress(&window, "uninstall", 0, "Starting uninstallation...", None);
-    
-    // Stop Gateway first
-    emit_progress(&window, "uninstall", 10, "Stopping Gateway...", None);
-    let _ = run_command("openclaw", &["gateway", "stop"]);
-    
-    // Remove data if requested
-    if remove_data {
-        emit_progress(&window, "uninstall", 30, "Removing OpenClaw data...", None);
-        if let Some(home) = dirs::home_dir() {
-            let openclaw_dir = home.join(".openclaw");
-            if openclaw_dir.exists() {
-                std::fs::remove_dir_all(&openclaw_dir).map_err(|e| e.to_string())?;
-            }
-        }
-    }
-    
-    // Uninstall OpenClaw
-    emit_progress(&window, "uninstall", 50, "Uninstalling OpenClaw CLI...", None);
-    run_command("npm", &["uninstall", "-g", "openclaw"])?;
-    
-    // Remove Node.js if requested
-    if remove_node {
-        emit_progress(&window, "uninstall", 70, "Removing Node.js...", None);
-        #[cfg(target_os = "windows")]
-        {
-            let _ = run_command("winget", &["uninstall", "OpenJS.NodeJS.LTS", "--silent"]);
-        }
-        #[cfg(target_os = "macos")]
-        {
-            let _ = run_command("brew", &["uninstall", "node@22"]);
-        }
-        #[cfg(target_os = "linux")]
-        {
-            let _ = run_command("sudo", &["apt-get", "remove", "-y", "nodejs"]);
-        }
-    }
-    
-    emit_progress(&window, "uninstall", 100, "Uninstallation complete!", None);
-    
-    Ok(())
 }
 
 // ─── Helper Functions ───
 
-fn run_command(cmd: &str, args: &[&str]) -> Result<std::process::Output, String> {
-    log::info!("Running command: {} {:?}", cmd, args);
-    
-    Command::new(cmd)
-        .args(args)
-        .output()
-        .map_err(|e| format!("Failed to run {}: {}", cmd, e))
+fn extract_port(output: &str) -> Option<u16> {
+    let re = regex::Regex::new(r"port[:\s]+(\d+)|:(\d+)").ok()?;
+    let caps = re.captures(output)?;
+    let port_str = caps.get(1).or(caps.get(2))?.as_str();
+    port_str.parse().ok()
 }
 
-async fn run_command_with_progress(
-    window: &Window,
-    cmd: &str,
-    args: &[&str],
-    step: &str,
-) -> Result<(), String> {
-    use std::process::Stdio;
-    use std::io::{BufRead, BufReader};
-    
-    log::info!("Running command with progress: {} {:?}", cmd, args);
-    
-    let mut child = Command::new(cmd)
-        .args(args)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("Failed to spawn {}: {}", cmd, e))?;
-    
-    let stdout = child.stdout.take().ok_or("Failed to capture stdout")?;
-    let stderr = child.stderr.take().ok_or("Failed to capture stderr")?;
-    
-    let mut stdout_reader = BufReader::new(stdout).lines();
-    let mut stderr_reader = BufReader::new(stderr).lines();
-    
-    let mut percent = 10u32;
-    
-    // Read stdout
-    while let Some(Ok(line)) = stdout_reader.next() {
-        log::info!("[{}] {}", cmd, line);
-        percent = (percent + 5).min(95);
-        emit_progress(window, step, percent, &line, Some(&line));
-    }
-    
-    // Read stderr
-    while let Some(Ok(line)) = stderr_reader.next() {
-        log::warn!("[{}] {}", cmd, line);
-        emit_progress(window, step, percent, &line, Some(&line));
-    }
-    
-    let status = child.wait().map_err(|e| e.to_string())?;
-    
-    if status.success() {
-        Ok(())
-    } else {
-        Err(format!("Command {} failed with status: {}", cmd, status))
-    }
-}
-
-async fn check_gateway_health(port: u16) -> Result<bool, String> {
-    let url = format!("http://127.0.0.1:{}/healthz", port);
-    
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(2))
-        .build()
-        .map_err(|e| e.to_string())?;
-    
-    match client.get(&url).send().await {
-        Ok(resp) => Ok(resp.status().is_success()),
-        Err(_) => Ok(false),
-    }
-}
-
-fn emit_progress(window: &Window, step: &str, percent: u32, message: &str, log_line: Option<&str>) {
-    let progress = InstallProgress {
-        step: step.to_string(),
-        percent,
-        message: message.to_string(),
-        log_line: log_line.map(|s| s.to_string()),
-    };
-    
-    if let Err(e) = window.emit("setup-progress", &progress) {
-        log::error!("Failed to emit progress: {}", e);
-    }
+fn extract_pid(output: &str) -> Option<u32> {
+    let re = regex::Regex::new(r"PID[:\s]+(\d+)").ok()?;
+    let caps = re.captures(output)?;
+    let pid_str = caps.get(1)?.as_str();
+    pid_str.parse().ok()
 }

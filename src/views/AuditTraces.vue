@@ -261,7 +261,7 @@ async function loadEntries() {
 
 async function loadCostSummary() {
   try {
-    const summary = await invoke('get_cost_summary')
+    const summary = await invoke<any>('get_cost_summary')
     todayCost.value = summary.today || 0
     weekCost.value = summary.week || 0
     budgetRemaining.value = summary.budget_remaining || 5.00
@@ -274,9 +274,9 @@ async function loadCostSummary() {
 
 async function exportLogs(format: string) {
   try {
-    const data = await invoke('export_audit_logs', { format })
+    const data = await invoke<number[]>('export_audit_logs', { format })
     // Download the file
-    const blob = new Blob([data], { type: format === 'json' ? 'application/json' : 'text/csv' })
+    const blob = new Blob([new Uint8Array(data)], { type: format === 'json' ? 'application/json' : 'text/csv' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
