@@ -47,6 +47,29 @@ onMounted(async () => {
   // Initialize event listener for OpenClaw process events
   agentStore.initEventListener()
 
+  // ALWAYS check environment first before showing any page
+  try {
+    const envStatus = await invoke<any>('get_env_status')
+    console.log('Environment status:', envStatus)
+    
+    const needsSetup = !envStatus?.openclaw?.installed
+    
+    if (needsSetup && route.name !== 'setup') {
+      console.log('OpenClaw not installed, redirecting to setup...')
+      router.replace('/setup')
+      isReady.value = true
+      return
+    }
+  } catch (e) {
+    console.error('Failed to check environment:', e)
+    // If we can't check, go to setup
+    if (route.name !== 'setup') {
+      router.replace('/setup')
+    }
+    isReady.value = true
+    return
+  }
+
   // Initialize database
   try {
     // Dynamic import for plugin-sql (only available in Tauri context)
@@ -62,14 +85,12 @@ onMounted(async () => {
     // Inject DB into settings store and load persisted values
     settingsStore.setDatabase(db)
     await settingsStore.loadAllSettings()
-    
-    // Check environment after DB is ready
-    await checkAndSetup()
   } catch (e) {
     // Expected to fail in browser dev mode (no Tauri runtime)
     console.warn('Tauri DB init skipped (browser mode):', e)
-    isReady.value = true
   }
+  
+  isReady.value = true
 })
 </script>
 
