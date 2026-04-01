@@ -4,6 +4,14 @@ version = "0.1.0"
 edition = "2021"
 description = "ClawStudio - OpenClaw Visual Workstation"
 
+[lib]
+name = "clawstudio_lib"
+path = "src/lib.rs"
+
+[[bin]]
+name = "clawstudio"
+path = "src/main.rs"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
@@ -18,7 +26,7 @@ tokio = { version = "1", features = ["full"] }
 futures-util = "0.3"
 keyring = "2"
 bollard = "0.16"               # Docker API client
-reqwest = { version = "0.11", features = ["json"] }  # HTTP client
+reqwest = { version = "0.11", features = ["json", "blocking"] }  # HTTP client
 base64 = "0.22"                # Base64 encoding
 tokio-tungstenite = "0.21"     # WebSocket for VNC
 uuid = { version = "1", features = ["v4"] }
@@ -32,6 +40,9 @@ which = "6"                    # Detect command paths
 regex = "1"                    # Regex parsing
 rusqlite = { version = "0.31", features = ["bundled"] }  # Local audit database
 csv = "1"                      # CSV export
+
+[dev-dependencies]
+tempfile = "3"
 
 [features]
 default = ["custom-protocol"]

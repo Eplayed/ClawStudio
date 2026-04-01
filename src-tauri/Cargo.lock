@@ -696,6 +696,7 @@ dependencies = [
  "tauri-plugin-shell",
  "tauri-plugin-sql",
  "tauri-plugin-updater",
+ "tempfile",
  "tokio",
  "tokio-tungstenite",
  "uuid",

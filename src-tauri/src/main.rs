@@ -3,18 +3,8 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod audit;
-mod channels;
-mod computer_use;
-mod db;
-mod docker;
-mod enterprise;
-mod gateway;
-mod keychain;
-mod openclaw;
-mod setup;
-mod template;
-mod vnc_client;
+// Import from lib
+use clawstudio_lib::*;
 
 use tauri::Manager;
 use gateway::GatewayState;

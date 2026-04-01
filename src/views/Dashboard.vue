@@ -1,32 +1,58 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAgentStore } from '@/stores/agents'
+import { invoke } from '@tauri-apps/api/core'
 
 const router = useRouter()
 const agentStore = useAgentStore()
 
 const totalCost = computed(() => agentStore.totalCostToday.toFixed(2))
 
-// Mock data for initial display (replace with store data when backend connected)
-const mockAgents = [
-  { id: 'agent-01', name: '整理发票', icon: '📄', status: 'running', cost: 0.34, time: '12m', progress: 67, task: '自动识别并整理本月 PDF 发票' },
-  { id: 'agent-02', name: '监控竞品网页', icon: '🔍', status: 'sleeping', cost: 0.12, time: '每2h', progress: 100, task: '每2小时巡查竞品官网价格变动' },
-  { id: 'agent-03', name: '客服自动回复', icon: '💬', status: 'running', cost: 1.89, time: '24条', progress: 40, task: '监听 Telegram 群组消息，自动响应' },
-]
+// Real agents from store, fallback to mock for display
+const displayAgents = computed(() => {
+  if (agentStore.agents.length > 0) {
+    return agentStore.agents.map(a => ({
+      id: a.id,
+      name: a.name,
+      icon: a.avatar,
+      status: a.status,
+      cost: a.currentCost,
+      time: a.elapsedSec > 0 ? `${Math.floor(a.elapsedSec / 60)}m` : '新启动',
+      progress: a.progress,
+      task: a.systemPrompt?.slice(0, 50) || '执行任务'
+    }))
+  }
+  // Mock data for initial display
+  return [
+    { id: 'agent-01', name: '整理发票', icon: '📄', status: 'running', cost: 0.34, time: '12m', progress: 67, task: '自动识别并整理本月 PDF 发票' },
+    { id: 'agent-02', name: '监控竞品网页', icon: '🔍', status: 'sleeping', cost: 0.12, time: '每2h', progress: 100, task: '每2小时巡查竞品官网价格变动' },
+    { id: 'agent-03', name: '客服自动回复', icon: '💬', status: 'running', cost: 1.89, time: '24条', progress: 40, task: '监听 Telegram 群组消息，自动响应' },
+  ]
+})
 
-// D1: Recent Activity (mock data)
-const recentActivities = [
-  { time: '14:32', icon: '✅', text: '<strong>AGENT-01</strong> 完成任务：发票整理' },
-  { time: '14:28', icon: '🚨', text: '<strong>AGENT-03</strong> 触发 HITL 审批' },
-  { time: '14:15', icon: '💬', text: '<strong>AGENT-03</strong> 发送消息到 Telegram' },
-  { time: '14:02', icon: '🔍', text: '<strong>AGENT-02</strong> 完成竞品价格巡查' },
-  { time: '13:45', icon: '📸', text: '<strong>AGENT-01</strong> 截图分析完成' },
-  { time: '13:30', icon: '🤖', text: '<strong>AGENT-01</strong> 开始执行任务' },
-]
+// Real activity from event log
+const recentActivities = computed(() => {
+  if (agentStore.eventLog.length > 0) {
+    return agentStore.eventLog.slice(-6).reverse().map(e => ({
+      time: e.timestamp?.slice(11, 16) || '刚刚',
+      icon: e.tool === 'screenshot' ? '📸' : e.tool === 'bash' ? '💻' : e.type === 'hitl' ? '🚨' : '✅',
+      text: `<strong>${e.agent_id || 'Agent'}</strong> ${e.tool || e.type || '操作'}`
+    }))
+  }
+  // Mock fallback
+  return [
+    { time: '14:32', icon: '✅', text: '<strong>AGENT-01</strong> 完成任务：发票整理' },
+    { time: '14:28', icon: '🚨', text: '<strong>AGENT-03</strong> 触发 HITL 审批' },
+    { time: '14:15', icon: '💬', text: '<strong>AGENT-03</strong> 发送消息到 Telegram' },
+    { time: '14:02', icon: '🔍', text: '<strong>AGENT-02</strong> 完成竞品价格巡查' },
+    { time: '13:45', icon: '📸', text: '<strong>AGENT-01</strong> 截图分析完成' },
+    { time: '13:30', icon: '🤖', text: '<strong>AGENT-01</strong> 开始执行任务' },
+  ]
+})
 
-// D2: 7-Day Cost Trend (mock data)
-const costData = [
+// Cost trend - load from backend
+const costData = ref([
   { day: '周一', cost: 1.23 },
   { day: '周二', cost: 1.50 },
   { day: '周三', cost: 1.15 },
@@ -34,8 +60,28 @@ const costData = [
   { day: '周五', cost: 2.04 },
   { day: '周六', cost: 0.55 },
   { day: '今日', cost: 2.47, highlight: true },
-]
-const maxCost = Math.max(...costData.map(d => d.cost))
+])
+
+async function loadCostTrend() {
+  try {
+    const summary = await invoke<any>('get_cost_summary', { days: 7 })
+    if (summary?.daily) {
+      costData.value = summary.daily.map((d: any, i: number) => ({
+        day: d.day || `Day ${i + 1}`,
+        cost: d.cost || 0,
+        highlight: i === summary.daily.length - 1
+      }))
+    }
+  } catch (e) {
+    // Keep mock data
+  }
+}
+
+const maxCost = computed(() => Math.max(...costData.value.map(d => d.cost)))
+
+onMounted(() => {
+  loadCostTrend()
+})
 </script>
 
 <template>
@@ -53,8 +99,8 @@ const maxCost = Math.max(...costData.map(d => d.cost))
       <div class="stats-row">
         <div class="stat-card cyan">
           <div class="stat-label">活跃特工 Active Agents</div>
-          <div class="stat-value">{{ mockAgents.filter(a => a.status === 'running').length }}</div>
-          <div class="stat-sub">{{ mockAgents.length }} 总计</div>
+          <div class="stat-value">{{ displayAgents.filter(a => a.status === 'running').length }}</div>
+          <div class="stat-sub">{{ displayAgents.length }} 总计</div>
         </div>
         <div class="stat-card amber">
           <div class="stat-label">今日任务 Tasks Today</div>
@@ -80,7 +126,7 @@ const maxCost = Math.max(...costData.map(d => d.cost))
       </div>
       <div class="agent-grid">
         <div
-          v-for="agent in mockAgents"
+          v-for="agent in displayAgents"
           :key="agent.id"
           class="agent-card"
           @click="router.push('/overwatch/' + agent.id)"
