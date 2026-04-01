@@ -3,220 +3,211 @@
 <div align="center">
   <img src="src-tauri/icons/icon.svg" alt="ClawStudio Logo" width="128" height="128">
   
-  <h3>AI Agent Visual Control Center</h3>
+  <h3>🦞 OpenClaw 可视化管理工作站</h3>
   
-  <p>A professional desktop application for monitoring and controlling AI agents with real-time visualization, VNC streaming, and cost tracking.</p>
+  <p>一键安装、可视化监控、零门槛使用 OpenClaw 的桌面应用。<br>
+  <strong>The "Docker Desktop" for OpenClaw.</strong></p>
 
   <p>
     <img src="https://img.shields.io/badge/version-0.1.0-blue.svg" alt="Version">
     <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg" alt="Platform">
-    <img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License">
+    <img src="https://img.shields.io/badge/license-AGPL--3.0-green.svg" alt="License">
     <img src="https://img.shields.io/badge/Tauri-v2-blueviolet.svg" alt="Tauri">
   </p>
 </div>
 
 ---
 
-## ✨ Features
+## 📦 下载安装
 
-### 🤖 Agents Dashboard
-- **Kanban Board**: 4-column task board (Queued / Running / Paused / Completed)
-- **Channel Aggregator**: Multi-platform integration (WeChat / Telegram / Discord)
-- **Agent Creation Wizard**: Full-featured modal with Computer Use and sandbox binding
+### Windows
 
-### 📺 Overwatch Console
-- **Thought Log**: Real-time AI reasoning stream with syntax highlighting
-- **Visual Stream**: Simulated desktop with AI cursor tracking
-- **HITL Bar**: Human-in-the-Loop approval system with timeout countdown
-- **VNC Streaming**: Live desktop view for Computer Use agents
+| 版本 | 下载 | 说明 |
+|------|------|------|
+| v0.1.0 | [ClawStudio_0.1.0_x64_portable.zip](https://github.com/Eplayed/ClawStudio/releases/download/v0.1.0/ClawStudio_0.1.0_x64_portable.zip) | 便携版，解压即运行 |
 
-### 📦 Sandboxes Manager
-- **Docker Integration**: Create, start, stop, destroy containers
-- **Resource Monitoring**: CPU/Memory usage bars
-- **VNC Connection**: One-click desktop access
-- **Installation Guide**: Platform-specific Docker setup
+### macOS / Linux
 
-### ⏱ Traces & Replay
-- **Session Player**: Step-by-step replay with speed control
-- **History Table**: Searchable task history with filters
-- **Export**: Download trace logs for analysis
-
-### 💰 Cost Tracking
-- **Real-time Calculator**: Accurate API cost estimation
-- **Budget Alerts**: Automatic pause when limit exceeded
-- **Multi-model Support**: Claude, GPT-4o pricing tables
+暂无预编译版本，请从源码编译。
 
 ---
 
-## 🖥 Screenshots
+## ✨ 核心功能
 
-| Dashboard | Overwatch |
-|:---------:|:---------:|
-| <img src="docs/screenshots/dashboard.png" width="400"> | <img src="docs/screenshots/overwatch.png" width="400"> |
+### 🚀 Setup Wizard（安装向导）
+- **一键安装 Node.js** - 自动检测并安装
+- **一键安装 OpenClaw** - 支持 npm 镜像加速
+- **API Key 配置** - 安全存储于系统 Keychain
+- **模型选择** - Claude / GPT-4o / DeepSeek
+- **通道配置** - Telegram / Discord / WeChat
 
-| Agents | Sandboxes |
-|:------:|:---------:|
-| <img src="docs/screenshots/agents.png" width="400"> | <img src="docs/screenshots/sandboxes.png" width="400"> |
+### 📊 Dashboard（仪表盘）
+- OpenClaw 运行状态实时监控
+- Gateway 启动/停止/重启
+- 活跃 Agent 统计
+- 今日费用 + 7 天趋势
+
+### 🤖 Agents（特工列队）
+- 看板视图管理多个 Agent
+- 通道聚合器（多平台消息）
+- 创建 Agent 向导
+
+### 📺 Overwatch（监控舱）
+- 思维流实时显示
+- 视觉流（VNC 桌面）
+- HITL 审批系统
+
+### 💰 Cost Monitor（烧钱计算器）
+- 预算油表
+- Token 分解
+- 自动熔断
+
+### ⏱ Audit & Traces（合规审计）
+- 操作回放
+- 7 天本地存储
+- CSV/JSON 导出
+
+### 🧙 Template Market（模板市场）
+- Agent 技能模板导入/导出
+- `.claw-template` 格式
+- 深链接分享 `claw://template/xxx`
 
 ---
 
-## 🚀 Quick Start
+## 🚀 快速开始
 
-### Prerequisites
+### 方式一：下载安装包（推荐）
 
-- **Node.js** 18+ 
-- **pnpm** 9+
-- **Rust** 1.70+ (for Tauri backend)
-- **Docker** (optional, for sandbox features)
+1. 访问 [Releases](https://github.com/Eplayed/ClawStudio/releases) 页面
+2. 下载对应平台的安装包
+3. 双击安装，首次启动进入 Setup Wizard
 
-### Installation
+### 方式二：从源码编译
+
+#### 前置要求
+
+| 工具 | 版本 | 说明 |
+|------|------|------|
+| Node.js | ≥ 22.0 | JavaScript 运行时 |
+| pnpm | ≥ 9.0 | 包管理器 |
+| Rust | ≥ 1.70 | 后端编译 |
+| VS Build Tools | 2022 | Windows 编译必需 |
+
+#### 编译步骤
 
 ```bash
-# Clone the repository
-git clone https://github.com/clawstudio/nova.git
-cd nova
+# 1. 克隆仓库
+git clone https://github.com/Eplayed/ClawStudio.git
+cd ClawStudio
 
-# Install dependencies
+# 2. 安装依赖
 pnpm install
 
-# Development mode
+# 3. 开发模式运行
 pnpm tauri dev
 
-# Build for production
+# 4. 构建生产版本
 pnpm tauri build
 ```
 
-### Development
+#### Windows 额外步骤
+
+```powershell
+# 安装 Visual Studio Build Tools
+winget install Microsoft.VisualStudio.2022.BuildTools --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+```
+
+---
+
+## 🧪 运行测试
 
 ```bash
-# Frontend only (fast iteration)
-pnpm dev
+# Rust 后端测试 (28 tests)
+cd src-tauri
+cargo test --lib
 
-# Full Tauri development
-pnpm tauri dev
-
-# Type checking
-pnpm typecheck
-
-# Lint
-pnpm lint
+# Vue 前端测试 (18 tests)
+pnpm test
 ```
 
 ---
 
-## 🏗 Architecture
+## 🏗 项目结构
 
 ```
-clawstudio/
-├── src/                    # Vue 3 frontend
-│   ├── components/         # Reusable UI components
-│   │   ├── KanbanBoard.vue
-│   │   ├── ThoughtLog.vue
-│   │   ├── VisualStream.vue
-│   │   ├── HITLBar.vue
-│   │   └── ...
-│   ├── views/              # Page components
-│   │   ├── Dashboard.vue
-│   │   ├── Agents.vue
-│   │   ├── Overwatch.vue
-│   │   ├── Sandboxes.vue
-│   │   └── Traces.vue
-│   ├── stores/             # Pinia state management
-│   │   ├── agents.ts
-│   │   └── settings.ts
-│   ├── utils/              # Helper functions
-│   │   ├── eventParser.ts
-│   │   └── costCalculator.ts
-│   └── styles/
-│       └── variables.css   # Design tokens
+ClawStudio/
+├── src/                    # Vue 3 前端
+│   ├── views/              # 页面组件
+│   │   ├── SetupWizard.vue # 安装向导
+│   │   ├── Dashboard.vue   # 仪表盘
+│   │   ├── Agents.vue      # 特工列队
+│   │   ├── Overwatch.vue   # 监控舱
+│   │   └── Settings.vue    # 系统设置
+│   ├── components/         # UI 组件
+│   ├── stores/             # Pinia 状态
+│   └── __tests__/          # 前端测试
 │
-├── src-tauri/              # Rust backend
-│   ├── src/
-│   │   ├── main.rs         # Tauri entry point
-│   │   ├── keychain.rs     # Secure key storage
-│   │   ├── openclaw.rs     # API client
-│   │   ├── docker.rs       # Container management
-│   │   └── db.rs           # SQLite operations
-│   └── tauri.conf.json     # Tauri configuration
+├── src-tauri/              # Rust 后端
+│   └── src/
+│       ├── main.rs         # 入口
+│       ├── setup.rs        # 环境检测+安装
+│       ├── gateway.rs      # Gateway 管理
+│       ├── audit.rs        # 审计日志
+│       ├── template.rs     # 模板系统
+│       └── tests/          # 后端测试
 │
-└── .github/
-    └── workflows/
-        └── release.yml     # CI/CD pipeline
+├── package.json            # 前端依赖
+├── Cargo.toml              # Rust 依赖
+└── LICENSE                 # AGPL-3.0
 ```
 
 ---
 
-## 🔧 Configuration
+## 🔐 安全性
 
-### API Keys
-
-ClawStudio stores API keys securely in your OS keychain:
-- **macOS**: Keychain Access
-- **Windows**: Credential Manager
-- **Linux**: Secret Service (GNOME Keyring / KWallet)
-
-### Settings
-
-Access via **Settings** page:
-- Default model selection
-- Computer Use model
-- Temperature
-- Permission levels
-- Budget limits
+- **API Key** 通过操作系统原生 Keychain 加密存储
+- **审计日志** 本地 7 天滚动存储
+- **HITL 拦截** 危险操作需人工确认
 
 ---
 
-## 🎨 Design System
+## 📜 开源协议
 
-ClawStudio uses a **Mission Control Dark** theme:
+ClawStudio 采用 **AGPL-3.0** 协议：
 
-| Token | Value | Usage |
-|-------|-------|-------|
-| `--bg-deep` | `#060a14` | Deepest background |
-| `--bg-base` | `#0a0e1a` | Primary background |
-| `--bg-card` | `#0f1629` | Card surfaces |
-| `--cyan` | `#06d6d6` | Primary accent |
-| `--amber` | `#f0a030` | Warning / active |
-| `--green` | `#22c55e` | Success |
-| `--red` | `#ef4444` | Error / danger |
+- ✅ 个人使用、学习、修改
+- ✅ 开源项目集成（需保持 AGPL-3.0）
+- ❌ 闭源商业使用（需购买商业授权）
 
-Font stack:
-- **UI**: Outfit, Noto Sans SC
-- **Monospace**: JetBrains Mono
+详见 [LICENSE](LICENSE)。
 
 ---
 
-## 🤝 Contributing
+## 🤝 贡献指南
 
-We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
+欢迎贡献代码、报告 Bug、提出建议！
 
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
----
-
-## 📝 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+1. Fork 本仓库
+2. 创建分支 (`git checkout -b feature/amazing-feature`)
+3. 提交更改 (`git commit -m 'Add amazing feature'`)
+4. 推送分支 (`git push origin feature/amazing-feature`)
+5. 提交 Pull Request
 
 ---
 
-## 🙏 Acknowledgments
+## 🙏 致谢
 
-- [Tauri](https://tauri.app/) - Cross-platform desktop framework
-- [Vue 3](https://vuejs.org/) - Progressive JavaScript framework
-- [noVNC](https://novnc.com/) - HTML5 VNC client
-- [Anthropic Claude](https://www.anthropic.com/) - AI model provider
+- [Tauri](https://tauri.app/) - 跨平台桌面框架
+- [Vue 3](https://vuejs.org/) - 前端框架
+- [OpenClaw](https://github.com/openclaw/openclaw) - AI Agent 框架
+- [Anthropic Claude](https://www.anthropic.com/) - AI 模型
 
 ---
 
 <div align="center">
-  <p>Made with ❤️ by the ClawStudio Team</p>
+  <p>Made with ❤️ by ClawStudio Team</p>
   <p>
-    <a href="https://github.com/clawstudio/nova/issues">Report Bug</a> ·
-    <a href="https://github.com/clawstudio/nova/issues">Request Feature</a>
+    <a href="https://github.com/Eplayed/ClawStudio/issues">报告 Bug</a> ·
+    <a href="https://github.com/Eplayed/ClawStudio/issues">功能建议</a>
   </p>
 </div>
