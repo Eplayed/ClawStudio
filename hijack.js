@@ -13,19 +13,31 @@ const originalWebSocket = global.WebSocket;
 // ClawStudio 监控端点
 const MONITOR_ENDPOINT = 'http://127.0.0.1:18788/monitor';
 
-// 需要拦截的域名
-const LLM_HOSTS = [
-  'portal.qwen.ai',
-  'dashscope.aliyuncs.com', 
-  'api.qwen.ai',
-  'openai.com',
-  'anthropic.com',
+// 🎯 全球主流大模型 API 域名/特征清单
+const TARGET_LLM_HOSTS =[
+    // --- 国际主流 ---
+    'api.openai.com',                     // OpenAI (GPT 系列)
+    'api.anthropic.com',                  // Anthropic (Claude 系列)
+    'generativelanguage.googleapis.com',  // Google Gemini
+    'api.mistral.ai',                     // Mistral
+    'api.cohere.ai',                      // Cohere
+    'api.groq.com',                       // Groq (极速推理)
+    'openai.azure.com',                   // Azure OpenAI (匹配所有子域名)
+    
+    // --- 国内主流 ---
+    'dashscope.aliyuncs.com',             // 阿里云 通义千问 (Qwen)
+    'api.deepseek.com',                   // DeepSeek (深度求索)
+    'api.moonshot.cn',                    // Moonshot (Kimi)
+    'open.bigmodel.cn',                   // 智谱 AI (GLM 系列)
+    'api.baichuan-ai.com',                // 百川智能
+    'aip.baidubce.com',                   // 百度 文心一言 (ERNIE)
+    'spark-api.xf-yun.com'                // 讯飞星火
 ];
 
 // 判断是否需要拦截
 function shouldIntercept(url) {
   const urlStr = typeof url === 'string' ? url : url.toString();
-  return LLM_HOSTS.some(host => urlStr.includes(host));
+  return TARGET_LLM_HOSTS.some(host => urlStr.includes(host));
 }
 
 // 发送到 ClawStudio 监控（异步，不阻塞）
@@ -190,7 +202,7 @@ console.log('╔═════════════════════�
 console.log('║           ClawStudio Qwen Portal Hijack Loaded            ║');
 console.log('╠═══════════════════════════════════════════════════════════╣');
 console.log('║ Monitoring LLM endpoints:                                 ║');
-LLM_HOSTS.forEach(host => {
+TARGET_LLM_HOSTS.forEach(host => {
   console.log('║   • ' + host.padEnd(53) + '║');
 });
 console.log('║                                                           ║');
