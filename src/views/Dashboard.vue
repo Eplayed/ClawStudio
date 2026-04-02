@@ -101,7 +101,9 @@ onMounted(() => {
       <GatewayStatusBar />
 
       <!-- Monitor Panel -->
-      <MonitorPanel />
+      <div class="monitor-wrap">
+        <MonitorPanel />
+      </div>
 
       <!-- Stats Row -->
       <div class="stats-row">
@@ -224,6 +226,8 @@ onMounted(() => {
 .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); animation: pulse-dot 2s infinite; }
 
 .content { flex: 1; overflow-y: auto; padding: 20px 24px; }
+
+.monitor-wrap { height: 260px; margin: 14px 0 20px; }
 
 .stats-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 20px; }
 .stat-card {

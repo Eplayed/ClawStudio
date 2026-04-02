@@ -41,6 +41,53 @@ export interface CircuitEvent {
   limit: number
 }
 
+export interface ProxyTokenUsageMonitorEvent {
+  type: 'proxy_token_usage'
+  timestamp: string
+  input: number
+  output: number
+  image: number
+  cost: number
+  model: string
+}
+
+export interface ProxyThinkingMonitorEvent {
+  type: 'proxy_thinking'
+  timestamp: string
+  step: number
+  text: string
+}
+
+export interface ProxyActionMonitorEvent {
+  type: 'proxy_action'
+  timestamp: string
+  step: number
+  tool: string
+  params: any
+}
+
+export interface ProxyHitlRequestMonitorEvent {
+  type: 'proxy_hitl_request'
+  timestamp: string
+  request_id: string
+  tool: string
+  params: any
+}
+
+export interface ProxyCircuitBreakerMonitorEvent {
+  type: 'proxy_circuit_breaker'
+  timestamp: string
+  reason: string
+  current_cost: number
+  limit: number
+}
+
+export interface ProxyErrorMonitorEvent {
+  type: 'proxy_error'
+  timestamp: string
+  message: string
+}
+
 // Monitor 事件 (来自 hijack 脚本)
 export interface LLMRequestEvent {
   type: 'llm_request'
@@ -75,7 +122,16 @@ export interface LLMErrorEvent {
   error: string
 }
 
-export type MonitorEvent = LLMRequestEvent | LLMResponseEvent | LLMErrorEvent
+export type MonitorEvent =
+  | ProxyTokenUsageMonitorEvent
+  | ProxyThinkingMonitorEvent
+  | ProxyActionMonitorEvent
+  | ProxyHitlRequestMonitorEvent
+  | ProxyCircuitBreakerMonitorEvent
+  | ProxyErrorMonitorEvent
+  | LLMRequestEvent
+  | LLMResponseEvent
+  | LLMErrorEvent
 
 export interface ProxyState {
   totalCost: number
@@ -118,22 +174,51 @@ export const useProxyStore = defineStore('proxy', {
 
       // 监听各种事件
       await listen<TokenUsageEvent>('proxy:token_usage', (e) => {
+        this.monitorEvents.push({
+          type: 'proxy_token_usage',
+          timestamp: new Date().toISOString(),
+          ...e.payload,
+        })
         this.totalCost += e.payload.cost
         this.inputTokens += e.payload.input
         this.outputTokens += e.payload.output
         this.imageTokens += e.payload.image
+        if (this.monitorEvents.length > 200) this.monitorEvents = this.monitorEvents.slice(-200)
       })
 
       await listen<ThinkingEvent>('proxy:thinking', (e) => {
         this.thinkingLog.push({ ...e.payload, timestamp: new Date().toLocaleTimeString() })
+        this.monitorEvents.push({
+          type: 'proxy_thinking',
+          timestamp: new Date().toISOString(),
+          step: e.payload.step,
+          text: e.payload.text,
+        })
+        if (this.monitorEvents.length > 200) this.monitorEvents = this.monitorEvents.slice(-200)
       })
 
       await listen<ActionEvent>('proxy:action', (e) => {
         this.actionLog.push({ ...e.payload, timestamp: new Date().toLocaleTimeString() })
+        this.monitorEvents.push({
+          type: 'proxy_action',
+          timestamp: new Date().toISOString(),
+          step: e.payload.step,
+          tool: e.payload.tool,
+          params: e.payload.params,
+        })
+        if (this.monitorEvents.length > 200) this.monitorEvents = this.monitorEvents.slice(-200)
       })
 
       await listen<HitlRequest>('proxy:hitl_request', (e) => {
         this.hitlPending = e.payload
+        this.monitorEvents.push({
+          type: 'proxy_hitl_request',
+          timestamp: new Date().toISOString(),
+          request_id: e.payload.request_id,
+          tool: e.payload.tool,
+          params: e.payload.params,
+        })
+        if (this.monitorEvents.length > 200) this.monitorEvents = this.monitorEvents.slice(-200)
       })
 
       await listen<HitlResponseEvent>('proxy:hitl_response', (e) => {
@@ -145,6 +230,23 @@ export const useProxyStore = defineStore('proxy', {
       await listen<CircuitEvent>('proxy:circuit_breaker', (e) => {
         this.circuitBroken = true
         this.totalCost = e.payload.current_cost
+        this.monitorEvents.push({
+          type: 'proxy_circuit_breaker',
+          timestamp: new Date().toISOString(),
+          reason: e.payload.reason,
+          current_cost: e.payload.current_cost,
+          limit: e.payload.limit,
+        })
+        if (this.monitorEvents.length > 200) this.monitorEvents = this.monitorEvents.slice(-200)
+      })
+
+      await listen<{ message: string }>('proxy:error', (e) => {
+        this.monitorEvents.push({
+          type: 'proxy_error',
+          timestamp: new Date().toISOString(),
+          message: e.payload.message,
+        })
+        if (this.monitorEvents.length > 200) this.monitorEvents = this.monitorEvents.slice(-200)
       })
 
       // 监听 hijack 脚本的 monitor 事件

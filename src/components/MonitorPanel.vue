@@ -17,8 +17,8 @@
     <div class="event-list" ref="eventListRef">
       <div v-if="store.monitorEvents.length === 0" class="empty-state">
         <div class="empty-icon">📡</div>
-        <p>Waiting for LLM requests...</p>
-        <p class="hint">Start QClaw with the hijack script to see events</p>
+        <p>Waiting for Proxy events...</p>
+        <p class="hint">触发一次模型调用后会出现 Token/Thinking/Action 等事件</p>
       </div>
 
       <div
@@ -86,6 +86,57 @@
             </div>
             <div class="error-message">{{ event.error }}</div>
           </div>
+          
+          <div v-else-if="event.type === 'proxy_token_usage'" class="response-info">
+            <div class="info-row">
+              <span class="label">Model:</span>
+              <span class="value model">{{ event.model }}</span>
+            </div>
+            <div class="info-row">
+              <span class="label">Tokens:</span>
+              <span class="value">{{ event.input }} in / {{ event.output }} out</span>
+            </div>
+            <div class="info-row">
+              <span class="label">Cost:</span>
+              <span class="value success">${{ event.cost.toFixed(6) }}</span>
+            </div>
+          </div>
+
+          <div v-else-if="event.type === 'proxy_thinking'" class="request-info">
+            <div class="info-row">
+              <span class="label">Step:</span>
+              <span class="value">{{ event.step }}</span>
+            </div>
+            <div class="error-message">{{ event.text }}</div>
+          </div>
+
+          <div v-else-if="event.type === 'proxy_action'" class="request-info">
+            <div class="info-row">
+              <span class="label">Tool:</span>
+              <span class="value model">{{ event.tool }}</span>
+            </div>
+            <div class="info-row">
+              <span class="label">Step:</span>
+              <span class="value">{{ event.step }}</span>
+            </div>
+            <div class="error-message">{{ JSON.stringify(event.params, null, 2) }}</div>
+          </div>
+
+          <div v-else-if="event.type === 'proxy_hitl_request'" class="error-info">
+            <div class="info-row">
+              <span class="label">HITL:</span>
+              <span class="value model">{{ event.tool }}</span>
+            </div>
+            <div class="error-message">{{ JSON.stringify(event.params, null, 2) }}</div>
+          </div>
+
+          <div v-else-if="event.type === 'proxy_circuit_breaker'" class="error-info">
+            <div class="error-message">{{ event.reason }} ({{ event.current_cost.toFixed(2) }} / {{ event.limit.toFixed(2) }})</div>
+          </div>
+
+          <div v-else-if="event.type === 'proxy_error'" class="error-info">
+            <div class="error-message">{{ event.message }}</div>
+          </div>
         </div>
       </div>
     </div>
@@ -93,9 +144,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, nextTick } from 'vue'
+import { ref, onMounted, nextTick, watch } from 'vue'
 import { useProxyStore } from '@/stores/proxy'
-import type { MonitorEvent, LLMRequestEvent, LLMResponseEvent, LLMErrorEvent } from '@/stores/proxy'
 
 const store = useProxyStore()
 const eventListRef = ref<HTMLElement | null>(null)
@@ -107,6 +157,17 @@ onMounted(async () => {
     await store.init()
   }
 })
+
+watch(
+  () => store.monitorEvents.length,
+  async () => {
+    if (!isListening.value) return
+    await nextTick()
+    if (eventListRef.value) {
+      eventListRef.value.scrollTop = eventListRef.value.scrollHeight
+    }
+  }
+)
 
 function clearEvents() {
   store.monitorEvents = []
@@ -130,6 +191,12 @@ function getEventIcon(type: string): string {
     case 'llm_request': return '📤'
     case 'llm_response': return '📥'
     case 'llm_error': return '❌'
+    case 'proxy_token_usage': return '💰'
+    case 'proxy_thinking': return '🧠'
+    case 'proxy_action': return '🧰'
+    case 'proxy_hitl_request': return '🛑'
+    case 'proxy_circuit_breaker': return '⛔'
+    case 'proxy_error': return '⚠️'
     default: return '📝'
   }
 }
@@ -139,6 +206,12 @@ function getEventLabel(type: string): string {
     case 'llm_request': return 'REQUEST'
     case 'llm_response': return 'RESPONSE'
     case 'llm_error': return 'ERROR'
+    case 'proxy_token_usage': return 'TOKEN'
+    case 'proxy_thinking': return 'THINK'
+    case 'proxy_action': return 'ACTION'
+    case 'proxy_hitl_request': return 'HITL'
+    case 'proxy_circuit_breaker': return 'CIRCUIT'
+    case 'proxy_error': return 'PROXY_ERR'
     default: return type
   }
 }
@@ -156,6 +229,7 @@ function getStatusClass(status: number): string {
   display: flex;
   flex-direction: column;
   height: 100%;
+  min-height: 240px;
   background: #1a1a2e;
   border-radius: 8px;
   overflow: hidden;

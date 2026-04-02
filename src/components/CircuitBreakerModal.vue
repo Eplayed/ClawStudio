@@ -27,7 +27,7 @@ async function increaseBudget() {
 
 <template>
   <Teleport to="body">
-    <div v-if="showModal" class="modal-overlay" @click.self="/* do nothing on backdrop */">
+    <div v-if="showModal" class="modal-overlay" @click.self.stop>
       <div class="modal-box circuit-modal">
         <div class="warning-icon">⚠️</div>
         <h2>预算已超支</h2>
