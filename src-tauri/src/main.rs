@@ -10,6 +10,7 @@ use tauri::Manager;
 use gateway::GatewayState;
 use setup::SetupState;
 use audit::AuditManager;
+use proxy::ProxyServerState;
 use std::path::PathBuf;
 
 fn main() {
@@ -31,6 +32,7 @@ fn main() {
         .manage(GatewayState::new())
         .manage(SetupState::new())
         .manage(AuditManager::new())
+        .manage(ProxyServerState::default())
         // -- Commands --
         .invoke_handler(tauri::generate_handler![
             // Keychain
@@ -85,6 +87,11 @@ fn main() {
             gateway::gateway_logs,
             gateway::check_openclaw_update,
             gateway::upgrade_openclaw,
+            // Proxy Server
+            proxy::start_proxy,
+            proxy::stop_proxy,
+            proxy::get_proxy_status,
+            proxy::reset_proxy_cost,
             // Channel Management
             channels::list_channels,
             channels::add_channel,

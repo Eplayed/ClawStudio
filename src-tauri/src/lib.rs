@@ -10,6 +10,8 @@ pub mod enterprise;
 pub mod gateway;
 pub mod keychain;
 pub mod openclaw;
+pub mod proxy;
+pub mod proxy_state;
 pub mod setup;
 pub mod template;
 pub mod vnc_client;

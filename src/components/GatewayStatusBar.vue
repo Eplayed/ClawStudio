@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
 
 const props = defineProps<{
   compact?: boolean
@@ -13,13 +14,28 @@ interface GatewayHealth {
   uptime_sec: number
 }
 
+interface ProxyStatus {
+  running: boolean
+  port: number
+}
+
+interface TokenUsageEvent {
+  input_tokens: number
+  output_tokens: number
+  cost: number
+  model: string
+}
+
 const health = ref<GatewayHealth | null>(null)
+const proxyStatus = ref<ProxyStatus | null>(null)
+const proxyCost = ref(0)
 const loading = ref(true)
 const error = ref('')
 const showLogs = ref(false)
 const logs = ref<string[]>([])
 
 let pollInterval: number | null = null
+let unlistenTokenUsage: (() => void) | null = null
 
 async function checkHealth() {
   loading.value = true
@@ -31,6 +47,45 @@ async function checkHealth() {
     error.value = ''
   } finally {
     loading.value = false
+  }
+}
+
+async function checkProxyStatus() {
+  try {
+    proxyStatus.value = await invoke('get_proxy_status')
+  } catch (e) {
+    proxyStatus.value = { running: false, port: 18788 }
+  }
+}
+
+async function startProxy() {
+  try {
+    await invoke('start_proxy', { 
+      port: 18788,
+      budgetLimit: 100.0,
+      hitlEnabled: true
+    })
+    await checkProxyStatus()
+  } catch (e) {
+    error.value = `代理启动失败: ${e}`
+  }
+}
+
+async function stopProxy() {
+  try {
+    await invoke('stop_proxy')
+    await checkProxyStatus()
+  } catch (e) {
+    error.value = `代理停止失败: ${e}`
+  }
+}
+
+async function resetProxyCost() {
+  try {
+    await invoke('reset_proxy_cost')
+    await checkProxyStatus()
+  } catch (e) {
+    error.value = `重置费用失败: ${e}`
   }
 }
 
@@ -77,14 +132,25 @@ function formatUptime(sec: number): string {
   return `${Math.floor(sec / 86400)}天`
 }
 
-onMounted(() => {
+onMounted(async () => {
   checkHealth()
+  checkProxyStatus()
   // Poll every 10 seconds
-  pollInterval = window.setInterval(checkHealth, 10000)
+  pollInterval = window.setInterval(() => {
+    checkHealth()
+    checkProxyStatus()
+  }, 10000)
+  
+  // Listen for token usage events from proxy
+  unlistenTokenUsage = await listen<TokenUsageEvent>('proxy:token_usage', (event) => {
+    console.log('Token usage:', event.payload)
+    checkProxyStatus()
+  })
 })
 
 onUnmounted(() => {
   if (pollInterval) clearInterval(pollInterval)
+  if (unlistenTokenUsage) unlistenTokenUsage()
 })
 </script>
 
@@ -110,10 +176,44 @@ onUnmounted(() => {
       <span v-if="health?.running && !props.compact" class="uptime">
         ↑ {{ formatUptime(health.uptime_sec) }}
       </span>
+      
+      <!-- Proxy Status -->
+      <div v-if="proxyStatus?.running && !props.compact" class="proxy-cost">
+        📊 代理运行中
+      </div>
     </div>
 
     <!-- Action Buttons -->
     <div class="status-actions">
+      <!-- Proxy Controls -->
+      <template v-if="!props.compact">
+        <button 
+          v-if="!proxyStatus?.running"
+          class="btn btn-outline btn-sm"
+          @click="startProxy"
+          title="启动代理监控"
+        >
+          📊 代理
+        </button>
+        <template v-else>
+          <button 
+            class="btn btn-ghost btn-sm"
+            @click="resetProxyCost"
+            title="重置费用"
+          >
+            ⟳
+          </button>
+          <button 
+            class="btn btn-outline btn-sm running"
+            @click="stopProxy"
+            title="停止代理"
+          >
+            📊 代理
+          </button>
+        </template>
+      </template>
+      
+      <!-- Gateway Controls -->
       <button 
         v-if="!health?.running"
         class="btn btn-success btn-sm"
@@ -241,6 +341,15 @@ onUnmounted(() => {
   color: var(--text-secondary);
 }
 
+.proxy-cost {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--green);
+  padding: 2px 8px;
+  background: rgba(34, 197, 94, 0.1);
+  border-radius: 8px;
+}
+
 .status-actions {
   display: flex;
   gap: 8px;
@@ -259,6 +368,21 @@ onUnmounted(() => {
 .btn-sm {
   padding: 4px 10px;
   font-size: 12px;
+}
+
+.btn-outline {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+}
+
+.btn-outline:hover {
+  background: var(--bg-base);
+}
+
+.btn-outline.running {
+  border-color: var(--green);
+  color: var(--green);
 }
 
 .btn-success {

@@ -3,6 +3,7 @@ import { computed, ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAgentStore } from '@/stores/agents'
 import { invoke } from '@tauri-apps/api/core'
+import GatewayStatusBar from '@/components/GatewayStatusBar.vue'
 
 const router = useRouter()
 const agentStore = useAgentStore()
@@ -95,6 +96,9 @@ onMounted(() => {
     </header>
 
     <div class="content">
+      <!-- Proxy Status Bar -->
+      <GatewayStatusBar />
+
       <!-- Stats Row -->
       <div class="stats-row">
         <div class="stat-card cyan">
