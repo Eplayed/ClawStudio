@@ -1,42 +1,110 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { useRouter } from 'vue-router'
 
 const emit = defineEmits(['complete', 'back'])
+const router = useRouter()
 
-const status = ref<'idle' | 'starting' | 'running' | 'error'>('idle')
-const message = ref('')
-const error = ref('')
+// 双状态：Proxy 网关 + OpenClaw 引擎
+type ServiceStatus = 'waiting' | 'starting' | 'running' | 'error'
+
+const proxyStatus = ref<ServiceStatus>('waiting')
+const openclawStatus = ref<ServiceStatus>('waiting')
+const proxyMessage = ref('🛡️ 视控舱安全网关 (Port: 18788)')
+const openclawMessage = ref('🦞 OpenClaw 核心引擎 (Port: 18789)')
+const errorMessage = ref('')
 
 async function checkStatus() {
+  // 检查 Proxy 状态
   try {
-    const health = await invoke('gateway_health', { port: 18789 })
-    const running = (health as any).running
-    status.value = running ? 'running' : 'idle'
-    message.value = running ? 'Gateway 运行中' : 'Gateway 未启动'
-  } catch (e) {
-    status.value = 'idle'
-    message.value = 'Gateway 未启动'
+    const status: any = await invoke('get_proxy_status')
+    proxyStatus.value = status.running ? 'running' : 'waiting'
+    if (status.running) {
+      proxyMessage.value = `🛡️ 网关运行中 ($${status.total_cost?.toFixed(4) ?? '0.00'})`
+    }
+  } catch {
+    proxyStatus.value = 'waiting'
+    proxyMessage.value = '🛡️ 视控舱安全网关 (Port: 18788)'
+  }
+
+  // 检查 Gateway 状态
+  try {
+    const health: any = await invoke('gateway_health', { port: 18789 })
+    openclawStatus.value = health.running ? 'running' : 'waiting'
+    if (health.running) {
+      openclawMessage.value = '🦞 OpenClaw 运行中'
+    }
+  } catch {
+    openclawStatus.value = 'waiting'
+    openclawMessage.value = '🦞 OpenClaw 核心引擎 (Port: 18789)'
   }
 }
 
-async function startGateway() {
-  status.value = 'starting'
-  message.value = '正在启动 Gateway...'
-  error.value = ''
-
+async function startBoth() {
+  errorMessage.value = ''
+  
+  // ========== 阶段1: 配置并启动 Proxy ==========
+  proxyStatus.value = 'starting'
+  proxyMessage.value = '⚙️ 正在劫持配置并启动安全网关...'
+  
   try {
-    await invoke('gateway_start', { port: 18789 })
-    status.value = 'running'
-    message.value = '🎉 Gateway 启动成功!'
+    // 1. 强制劫持 OpenClaw 的 LLM Base URL 指向本地 Proxy
+    await invoke('configure_openclaw_proxy', { proxyPort: 18788 })
+    
+    // 2. 启动本地 API 代理服务器
+    await invoke('start_proxy', { port: 18788 })
+    
+    proxyStatus.value = 'running'
+    proxyMessage.value = '✅ 安全网关已接管 (Port: 18788)'
   } catch (e) {
-    status.value = 'error'
-    error.value = `启动失败: ${e}`
+    proxyStatus.value = 'error'
+    proxyMessage.value = `❌ 网关启动失败`
+    errorMessage.value = `Proxy 启动失败: ${e}`
+    return
   }
+
+  // ========== 阶段2: 启动 OpenClaw ==========
+  openclawStatus.value = 'starting'
+  openclawMessage.value = '⚙️ 正在启动 OpenClaw 核心...'
+  
+  try {
+    await invoke('start_gateway', { port: 18789 })
+    openclawStatus.value = 'running'
+    openclawMessage.value = '✅ OpenClaw 已连接'
+  } catch (e) {
+    openclawStatus.value = 'error'
+    openclawMessage.value = `❌ 引擎启动失败`
+    errorMessage.value = `Gateway 启动失败: ${e}`
+    return
+  }
+
+  // ========== 阶段3: 跳转到 Dashboard ==========
+  setTimeout(() => {
+    router.push('/dashboard')
+  }, 1500)
 }
 
 function finish() {
-  emit('complete', { gatewayStarted: true })
+  router.push('/dashboard')
+}
+
+function getStatusIcon(status: ServiceStatus): string {
+  switch (status) {
+    case 'waiting': return '⏳'
+    case 'starting': return '⚙️'
+    case 'running': return '✅'
+    case 'error': return '❌'
+  }
+}
+
+function getStatusClass(status: ServiceStatus): string {
+  switch (status) {
+    case 'waiting': return 'status-waiting'
+    case 'starting': return 'status-starting'
+    case 'running': return 'status-running'
+    case 'error': return 'status-error'
+  }
 }
 
 onMounted(checkStatus)
@@ -44,64 +112,79 @@ onMounted(checkStatus)
 
 <template>
   <div class="launch-gateway">
-    <h2>🚀 启动 Gateway</h2>
-    <p class="subtitle">启动 OpenClaw Gateway 服务</p>
+    <h2>🚀 启动引擎</h2>
+    <p class="subtitle">双重启动：安全网关 → 核心引擎</p>
 
-    <!-- Status Display -->
-    <div class="status-panel" :class="status">
-      <div class="status-icon">
-        <span v-if="status === 'idle'">⏳</span>
-        <span v-else-if="status === 'starting'">⚙️</span>
-        <span v-else-if="status === 'running'">✅</span>
-        <span v-else>❌</span>
+    <!-- 双重状态灯 -->
+    <div class="dual-status">
+      <!-- Proxy 状态 -->
+      <div class="service-card" :class="getStatusClass(proxyStatus)">
+        <div class="service-header">
+          <span class="service-icon">{{ getStatusIcon(proxyStatus) }}</span>
+          <span class="service-label">{{ proxyMessage }}</span>
+        </div>
+        <div class="status-badge" :class="getStatusClass(proxyStatus)">
+          {{ proxyStatus === 'waiting' ? '等待启动' :
+             proxyStatus === 'starting' ? '启动中...' :
+             proxyStatus === 'running' ? '运行中' : '启动失败' }}
+        </div>
       </div>
-      
-      <div class="status-message">
-        {{ message }}
-      </div>
-      
-      <div v-if="error" class="error-message">
-        {{ error }}
+
+      <!-- OpenClaw 状态 -->
+      <div class="service-card" :class="getStatusClass(openclawStatus)">
+        <div class="service-header">
+          <span class="service-icon">{{ getStatusIcon(openclawStatus) }}</span>
+          <span class="service-label">{{ openclawMessage }}</span>
+        </div>
+        <div class="status-badge" :class="getStatusClass(openclawStatus)">
+          {{ openclawStatus === 'waiting' ? '等待启动' :
+             openclawStatus === 'starting' ? '启动中...' :
+             openclawStatus === 'running' ? '运行中' : '启动失败' }}
+        </div>
       </div>
     </div>
 
-    <!-- Instructions -->
-    <div v-if="status === 'idle'" class="instructions">
-      <p>点击下方按钮启动 Gateway 服务</p>
-      <p class="hint">Gateway 是 OpenClaw 的核心服务，负责管理所有 Agent</p>
+    <!-- 错误提示 -->
+    <div v-if="errorMessage" class="error-panel">
+      <span class="error-icon">⚠️</span>
+      <span class="error-text">{{ errorMessage }}</span>
     </div>
 
-    <!-- Running Info -->
-    <div v-if="status === 'running'" class="running-info">
-      <div class="info-item">
-        <span class="label">端口:</span>
-        <span class="value">18789</span>
-      </div>
-      <div class="info-item">
-        <span class="label">状态:</span>
-        <span class="value success">运行中</span>
-      </div>
-    </div>
-
-    <!-- Actions -->
+    <!-- 操作区 -->
     <div class="actions">
-      <button 
-        v-if="status !== 'running'"
+      <!-- 启动按钮 -->
+      <button
+        v-if="proxyStatus !== 'running' || openclawStatus !== 'running'"
         class="btn btn-primary btn-large"
-        :disabled="status === 'starting'"
-        @click="startGateway"
+        :disabled="proxyStatus === 'starting' || openclawStatus === 'starting'"
+        @click="startBoth"
       >
-        {{ status === 'starting' ? '启动中...' : '启动 Gateway' }}
+        <span v-if="proxyStatus === 'starting' || openclawStatus === 'starting'">
+          ⚙️ 启动中...
+        </span>
+        <span v-else>
+          🛡️ 启动安全网关 & 引擎
+        </span>
       </button>
-      
-      <div v-if="status === 'running'" class="success-actions">
-        <button class="btn btn-secondary" @click="checkStatus">
-          🔄 刷新状态
-        </button>
-        <button class="btn btn-success btn-large" @click="finish">
-          🚀 进入控制台
-        </button>
+
+      <!-- 已运行状态 -->
+      <div v-else class="success-panel">
+        <div class="success-icon">🎉</div>
+        <p class="success-text">双重启动成功！准备进入控制台...</p>
+        <div class="success-actions">
+          <button class="btn btn-secondary" @click="checkStatus">
+            🔄 刷新状态
+          </button>
+          <button class="btn btn-success btn-large" @click="finish">
+            🚀 进入控制台
+          </button>
+        </div>
       </div>
+    </div>
+
+    <!-- 安全说明 -->
+    <div class="security-note">
+      <p>🔒 安全机制：所有 LLM 请求都会经过本地网关监控，拦截高危操作并追踪费用</p>
     </div>
 
     <div class="footer-actions">
@@ -114,7 +197,7 @@ onMounted(checkStatus)
 
 <style scoped>
 .launch-gateway {
-  max-width: 500px;
+  max-width: 560px;
   margin: 0 auto;
   text-align: center;
 }
@@ -129,85 +212,107 @@ h2 {
   margin-bottom: 32px;
 }
 
-.status-panel {
-  padding: 48px;
-  background: var(--bg-card);
-  border-radius: 16px;
-  margin-bottom: 24px;
-}
-
-.status-panel.running {
-  border: 2px solid var(--green);
-}
-
-.status-panel.error {
-  border: 2px solid var(--red);
-}
-
-.status-icon {
-  font-size: 64px;
-  margin-bottom: 16px;
-}
-
-.status-message {
-  font-size: 20px;
-  font-weight: 600;
-  margin-bottom: 8px;
-}
-
-.error-message {
-  color: var(--red);
-  margin-top: 8px;
-}
-
-.instructions {
-  margin-bottom: 24px;
-}
-
-.instructions p {
-  margin-bottom: 8px;
-}
-
-.hint {
-  font-size: 13px;
-  color: var(--text-secondary);
-}
-
-.running-info {
-  display: flex;
-  justify-content: center;
-  gap: 32px;
-  margin-bottom: 24px;
-}
-
-.info-item {
+/* 双重状态卡片 */
+.dual-status {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 16px;
+  margin-bottom: 24px;
 }
 
-.info-item .label {
+.service-card {
+  padding: 20px;
+  background: var(--bg-card);
+  border-radius: 12px;
+  border: 2px solid var(--border);
+  transition: all 0.3s;
+}
+
+.service-card.status-running {
+  border-color: var(--green);
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.1) 0%, var(--bg-card) 100%);
+}
+
+.service-card.status-starting {
+  border-color: var(--yellow);
+  background: linear-gradient(135deg, rgba(234, 179, 8, 0.1) 0%, var(--bg-card) 100%);
+}
+
+.service-card.status-error {
+  border-color: var(--red);
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.1) 0%, var(--bg-card) 100%);
+}
+
+.service-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.service-icon {
+  font-size: 28px;
+}
+
+.service-label {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.status-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 20px;
   font-size: 12px;
+  font-weight: 500;
+}
+
+.status-badge.status-waiting {
+  background: rgba(255, 255, 255, 0.1);
   color: var(--text-secondary);
 }
 
-.info-item .value {
-  font-size: 16px;
-  font-weight: 600;
+.status-badge.status-starting {
+  background: rgba(234, 179, 8, 0.2);
+  color: var(--yellow);
 }
 
-.info-item .value.success {
+.status-badge.status-running {
+  background: rgba(34, 197, 94, 0.2);
   color: var(--green);
 }
 
-.actions {
-  margin-bottom: 24px;
+.status-badge.status-error {
+  background: rgba(239, 68, 68, 0.2);
+  color: var(--red);
 }
 
-.success-actions {
+/* 错误提示 */
+.error-panel {
   display: flex;
+  align-items: center;
   gap: 12px;
-  justify-content: center;
+  padding: 16px;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid var(--red);
+  border-radius: 8px;
+  margin-bottom: 24px;
+  text-align: left;
+}
+
+.error-icon {
+  font-size: 20px;
+}
+
+.error-text {
+  color: var(--red);
+  font-size: 14px;
+}
+
+/* 操作按钮 */
+.actions {
+  margin-bottom: 24px;
 }
 
 .btn {
@@ -225,13 +330,18 @@ h2 {
 }
 
 .btn:disabled {
-  opacity: 0.5;
+  opacity: 0.6;
   cursor: not-allowed;
 }
 
 .btn-primary {
-  background: var(--cyan);
+  background: linear-gradient(135deg, var(--cyan) 0%, #0891b2 100%);
   color: var(--bg-deep);
+}
+
+.btn-primary:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(34, 211, 238, 0.4);
 }
 
 .btn-success {
@@ -242,6 +352,46 @@ h2 {
 .btn-secondary {
   background: var(--bg-card);
   color: var(--text-primary);
+  border: 1px solid var(--border);
+}
+
+/* 成功状态 */
+.success-panel {
+  padding: 24px;
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.1) 0%, var(--bg-card) 100%);
+  border-radius: 12px;
+  border: 1px solid var(--green);
+}
+
+.success-icon {
+  font-size: 48px;
+  margin-bottom: 12px;
+}
+
+.success-text {
+  font-size: 16px;
+  color: var(--green);
+  margin-bottom: 20px;
+}
+
+.success-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+}
+
+/* 安全说明 */
+.security-note {
+  padding: 12px 16px;
+  background: rgba(34, 211, 238, 0.1);
+  border-radius: 8px;
+  margin-bottom: 24px;
+}
+
+.security-note p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--cyan);
 }
 
 .footer-actions {

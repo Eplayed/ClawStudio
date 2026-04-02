@@ -189,10 +189,10 @@ async fn handle_anthropic_messages(
     event_sender: mpsc::Sender<ProxyEvent>,
 ) -> Result<Response<Full<Bytes>>, hyper::Error> {
     // 获取请求体
-    let body = req.collect().await?.to_bytes();
+    let body_bytes = req.collect().await?.to_bytes();
     
     // 解析请求 JSON
-    let request_json: serde_json::Value = match serde_json::from_slice(&body) {
+    let mut request_json: serde_json::Value = match serde_json::from_slice(&body_bytes) {
         Ok(v) => v,
         Err(e) => {
             return Ok(Response::builder().status(hyper::StatusCode::BAD_REQUEST)
@@ -200,6 +200,22 @@ async fn handle_anthropic_messages(
                 .unwrap());
         }
     };
+    
+    // ========== 流式降级处理 ==========
+    // 由于 SSE 分块特性会导致解析失败，强制禁用流式输出
+    if let Some(obj) = request_json.as_object_mut() {
+        if let Some(stream_val) = obj.get("stream") {
+            if stream_val.is_boolean() && stream_val.as_bool().unwrap_or(false) {
+                println!("[Proxy] Detected stream=true, forcing stream=false for parsing compatibility");
+                obj.insert("stream".to_string(), serde_json::Value::Bool(false));
+            }
+        }
+    }
+    
+    // 重新序列化为 Bytes 用于转发
+    let body = serde_json::to_vec(&request_json)
+        .map(hyper::body::Bytes::from)
+        .unwrap_or_else(|_| body_bytes.clone());
     
     // 提取 model
     let model = request_json.get("model")
@@ -391,9 +407,10 @@ async fn handle_openai_chat(
     event_sender: mpsc::Sender<ProxyEvent>,
 ) -> Result<Response<Full<Bytes>>, hyper::Error> {
     // 类似 Anthropic 处理，但使用 OpenAI 格式
-    let body = req.collect().await?.to_bytes();
+    let body_bytes = req.collect().await?.to_bytes();
     
-    let request_json: serde_json::Value = match serde_json::from_slice(&body) {
+    // 解析请求 JSON
+    let mut request_json: serde_json::Value = match serde_json::from_slice(&body_bytes) {
         Ok(v) => v,
         Err(e) => {
             return Ok(Response::builder().status(hyper::StatusCode::BAD_REQUEST)
@@ -401,6 +418,21 @@ async fn handle_openai_chat(
                 .unwrap());
         }
     };
+    
+    // ========== 流式降级处理 ==========
+    if let Some(obj) = request_json.as_object_mut() {
+        if let Some(stream_val) = obj.get("stream") {
+            if stream_val.is_boolean() && stream_val.as_bool().unwrap_or(false) {
+                println!("[Proxy] OpenAI: Detected stream=true, forcing stream=false");
+                obj.insert("stream".to_string(), serde_json::Value::Bool(false));
+            }
+        }
+    }
+    
+    // 重新序列化为 Bytes 用于转发
+    let body = serde_json::to_vec(&request_json)
+        .map(hyper::body::Bytes::from)
+        .unwrap_or_else(|_| body_bytes.clone());
     
     let model = request_json.get("model")
         .and_then(|v| v.as_str())
