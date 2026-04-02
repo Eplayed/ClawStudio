@@ -27,6 +27,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 pub async fn start_proxy_server(
     port: u16,
     state: Arc<ProxyState>,
+    app_handle: AppHandle,
 ) -> Result<(), String> {
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
     
@@ -47,17 +48,21 @@ pub async fn start_proxy_server(
         port,
     }).await;
     
+    // Clone app_handle for the loop
+    let app_handle_clone = app_handle.clone();
+    
     // 主循环
     loop {
         match listener.accept().await {
             Ok((stream, client_addr)) => {
                 let state_clone = state.clone();
                 let event_sender_clone = state.event_sender.clone();
+                let app_handle_inner = app_handle_clone.clone();
                 
                 tokio::spawn(async move {
                     let io = TokioIo::new(stream);
                     let service = service_fn(move |req| {
-                        handle_request(req, state_clone.clone(), event_sender_clone.clone())
+                        handle_request(req, state_clone.clone(), event_sender_clone.clone(), app_handle_inner.clone())
                     });
                     
                     if let Err(err) = http1::Builder::new()
@@ -86,6 +91,7 @@ async fn handle_request(
     req: Request<Incoming>,
     state: Arc<ProxyState>,
     event_sender: mpsc::Sender<ProxyEvent>,
+    app_handle: AppHandle,
 ) -> Result<Response<Full<Bytes>>, hyper::Error> {
     // 检查服务器是否运行
     if !state.running.load(std::sync::atomic::Ordering::Relaxed) {
@@ -128,6 +134,33 @@ async fn handle_request(
             Ok(Response::builder().status(hyper::StatusCode::OK)
                 .body(Full::new(Bytes::from(r#"{"status":"ok"}"#)))
                 .unwrap())
+        }
+        // 监控端点 - 接收 hijack 脚本的事件
+        (Method::POST, "/monitor") => {
+            // 读取请求体
+            let body = req.collect().await?;
+            let body_bytes = body.to_bytes();
+            
+            match serde_json::from_slice::<serde_json::Value>(&body_bytes) {
+                Ok(event) => {
+                    let event_type = event.get("type").and_then(|v| v.as_str()).unwrap_or("unknown");
+                    println!("[Monitor] Received event: {}", event_type);
+                    
+                    // 发送事件到前端
+                    let _ = app_handle.emit(&format!("monitor:{}", event_type), &event);
+                    let _ = app_handle.emit("monitor:event", &event);
+                    
+                    Ok(Response::builder().status(hyper::StatusCode::OK)
+                        .header("Content-Type", "application/json")
+                        .body(Full::new(Bytes::from(r#"{"received":true}"#)))
+                        .unwrap())
+                }
+                Err(e) => {
+                    Ok(Response::builder().status(hyper::StatusCode::BAD_REQUEST)
+                        .body(Full::new(Bytes::from(format!("Invalid JSON: {}", e))))
+                        .unwrap())
+                }
+            }
         }
         // 状态检查
         (Method::GET, "/status") => {
@@ -694,10 +727,11 @@ pub async fn start_proxy(
     
     // 启动服务器任务
     let running_clone = running.clone();
+    let app_handle_for_server = app_handle.clone();
     tokio::spawn(async move {
         // 使用优雅 shutdown
         tokio::select! {
-            result = start_proxy_server(port, proxy_state) => {
+            result = start_proxy_server(port, proxy_state, app_handle_for_server) => {
                 if let Err(e) = result {
                     println!("[Proxy] Server error: {}", e);
                 }

@@ -41,6 +41,42 @@ export interface CircuitEvent {
   limit: number
 }
 
+// Monitor 事件 (来自 hijack 脚本)
+export interface LLMRequestEvent {
+  type: 'llm_request'
+  timestamp: string
+  method: string
+  url: string
+  model: string
+  messageCount: number
+  stream: boolean
+}
+
+export interface LLMResponseEvent {
+  type: 'llm_response'
+  timestamp: string
+  url: string
+  duration: number
+  status: number
+  model: string
+  usage: {
+    prompt_tokens?: number
+    completion_tokens?: number
+    total_tokens?: number
+  } | null
+  finishReason?: string
+  error?: string
+}
+
+export interface LLMErrorEvent {
+  type: 'llm_error'
+  timestamp: string
+  url: string
+  error: string
+}
+
+export type MonitorEvent = LLMRequestEvent | LLMResponseEvent | LLMErrorEvent
+
 export interface ProxyState {
   totalCost: number
   inputTokens: number
@@ -51,6 +87,8 @@ export interface ProxyState {
   hitlPending: HitlRequest | null
   circuitBroken: boolean
   budgetLimit: number
+  // Monitor 事件历史
+  monitorEvents: MonitorEvent[]
 }
 
 export const useProxyStore = defineStore('proxy', {
@@ -64,6 +102,7 @@ export const useProxyStore = defineStore('proxy', {
     hitlPending: null,
     circuitBroken: false,
     budgetLimit: 100.0,
+    monitorEvents: [],
   }),
 
   actions: {
@@ -106,6 +145,29 @@ export const useProxyStore = defineStore('proxy', {
       await listen<CircuitEvent>('proxy:circuit_breaker', (e) => {
         this.circuitBroken = true
         this.totalCost = e.payload.current_cost
+      })
+
+      // 监听 hijack 脚本的 monitor 事件
+      await listen<MonitorEvent>('monitor:event', (e) => {
+        this.monitorEvents.push(e.payload)
+        // 只保留最近 100 个事件
+        if (this.monitorEvents.length > 100) {
+          this.monitorEvents = this.monitorEvents.slice(-100)
+        }
+        console.log('[Monitor] Event received:', e.payload.type)
+      })
+
+      // 单独监听各类 monitor 事件（方便调试）
+      await listen<LLMRequestEvent>('monitor:llm_request', (e) => {
+        console.log('[Monitor] LLM Request:', e.payload.model, e.payload.url)
+      })
+
+      await listen<LLMResponseEvent>('monitor:llm_response', (e) => {
+        console.log('[Monitor] LLM Response:', e.payload.status, e.payload.duration + 'ms')
+      })
+
+      await listen<LLMErrorEvent>('monitor:llm_error', (e) => {
+        console.error('[Monitor] LLM Error:', e.payload.error)
       })
     },
 

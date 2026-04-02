@@ -31,7 +31,7 @@ interface QueryPlan {
 async function checkAndSetup() {
   try {
     const envStatus = await invoke<any>('get_env_status')
-    const needsSetup = !envStatus?.openclaw?.installed || !envStatus?.gateway?.running
+    const needsSetup = !envStatus?.openclaw?.installed
     
     // Redirect to setup if not fully configured and not already on setup page
     if (needsSetup && route.name !== 'setup') {
@@ -39,13 +39,13 @@ async function checkAndSetup() {
     } else if (!needsSetup) {
       await invoke('configure_openclaw_proxy', { proxyPort: 18788 })
     }
-    isReady.value = true
+    return needsSetup
   } catch (e) {
     // If we can't check, assume first run
     if (route.name !== 'setup') {
       router.replace('/setup')
     }
-    isReady.value = true
+    return true
   }
 }
 
@@ -56,30 +56,15 @@ onMounted(async () => {
   // Initialize event listener for OpenClaw process events
   agentStore.initEventListener()
 
-  // ALWAYS check environment first before showing any page
-  try {
-    const envStatus = await invoke<any>('get_env_status')
-    console.log('Environment status:', envStatus)
-    
-    const needsSetup = !envStatus?.openclaw?.installed
-    
-    if (needsSetup && route.name !== 'setup') {
-      console.log('OpenClaw not installed, redirecting to setup...')
-      router.replace('/setup')
+  const isTauriRuntime =
+    typeof window !== 'undefined' && ('__TAURI_INTERNALS__' in window || '__TAURI__' in window)
+
+  if (isTauriRuntime) {
+    const needsSetup = await checkAndSetup()
+    if (needsSetup) {
       isReady.value = true
       return
-    } else if (!needsSetup) {
-      // Ensure local proxy is configured
-      await invoke('configure_openclaw_proxy', { proxyPort: 18788 })
     }
-  } catch (e) {
-    console.error('Failed to check environment:', e)
-    // If we can't check, go to setup
-    if (route.name !== 'setup') {
-      router.replace('/setup')
-    }
-    isReady.value = true
-    return
   }
 
   // Initialize database

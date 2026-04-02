@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { useAgentStore } from '@/stores/agents'
 import { invoke } from '@tauri-apps/api/core'
 import GatewayStatusBar from '@/components/GatewayStatusBar.vue'
+import MonitorPanel from '@/components/MonitorPanel.vue'
 
 const router = useRouter()
 const agentStore = useAgentStore()
@@ -98,6 +99,9 @@ onMounted(() => {
     <div class="content">
       <!-- Proxy Status Bar -->
       <GatewayStatusBar />
+
+      <!-- Monitor Panel -->
+      <MonitorPanel />
 
       <!-- Stats Row -->
       <div class="stats-row">
