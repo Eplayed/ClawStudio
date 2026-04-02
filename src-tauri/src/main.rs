@@ -93,6 +93,7 @@ fn main() {
             proxy::stop_proxy,
             proxy::get_proxy_status,
             proxy::reset_proxy_cost,
+            proxy::set_proxy_budget_limit,
             proxy::hitl_approve,
             proxy::hitl_reject,
             // Channel Management

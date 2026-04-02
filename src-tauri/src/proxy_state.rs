@@ -172,7 +172,7 @@ impl ProxyState {
     }
 
     /// 触发熔断
-    fn trigger_circuit_breaker(&self, reason: String) {
+    pub fn trigger_circuit_breaker(&self, reason: String) {
         self.circuit_broken.store(true, std::sync::atomic::Ordering::Relaxed);
         
         let current_cost = self.get_current_cost();

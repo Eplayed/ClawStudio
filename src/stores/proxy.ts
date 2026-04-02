@@ -140,6 +140,15 @@ export const useProxyStore = defineStore('proxy', {
       } catch (e) {
         console.error('Reset cost failed:', e)
       }
+    },
+
+    async setBudgetLimit(limit: number) {
+      try {
+        await invoke('set_proxy_budget_limit', { limit })
+        this.budgetLimit = limit
+      } catch (e) {
+        console.error('Set budget limit failed:', e)
+      }
     }
   }
 })

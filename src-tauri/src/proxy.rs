@@ -697,12 +697,36 @@ pub async fn stop_proxy(state: State<'_, ProxyServerState>) -> Result<String, St
     Ok("Proxy server stopped".to_string())
 }
 
-/// 获取代理状态
+/// 获取代理完整状态
 #[tauri::command]
 pub fn get_proxy_status(state: State<'_, ProxyServerState>) -> serde_json::Value {
+    let total_cost = state.proxy_state.blocking_lock()
+        .as_ref()
+        .map(|ps| ps.get_current_cost())
+        .unwrap_or(0.0);
+    
+    let budget_limit = state.proxy_state.blocking_lock()
+        .as_ref()
+        .map(|ps| ps.budget_limit.load(std::sync::atomic::Ordering::Relaxed) as f64 / 10000.0)
+        .unwrap_or(100.0);
+    
+    let circuit_broken = state.proxy_state.blocking_lock()
+        .as_ref()
+        .map(|ps| ps.is_circuit_broken())
+        .unwrap_or(false);
+    
+    let pending_hitl = state.proxy_state.blocking_lock()
+        .as_ref()
+        .map(|ps| ps.hitl_pending.blocking_lock().len())
+        .unwrap_or(0);
+    
     serde_json::json!({
         "running": state.running.load(std::sync::atomic::Ordering::Relaxed),
         "port": state.port.load(std::sync::atomic::Ordering::Relaxed),
+        "total_cost": total_cost,
+        "budget_limit": budget_limit,
+        "pending_hitl": pending_hitl,
+        "circuit_broken": circuit_broken,
     })
 }
 
@@ -736,6 +760,24 @@ pub async fn reset_proxy_cost(state: State<'_, ProxyServerState>) -> Result<Stri
         proxy_state.reset_cost();
         proxy_state.reset_circuit_breaker();
         Ok("Cost reset successfully".to_string())
+    } else {
+        Err("Proxy is not running".to_string())
+    }
+}
+
+/// 设置预算上限
+#[tauri::command]
+pub async fn set_proxy_budget_limit(limit: f64, state: State<'_, ProxyServerState>) -> Result<String, String> {
+    if let Some(proxy_state) = state.proxy_state.lock().await.as_ref() {
+        let limit_i64 = (limit * 10000.0) as i64;
+        proxy_state.budget_limit.store(limit_i64, std::sync::atomic::Ordering::Relaxed);
+        
+        // 如果设置后低于当前费用，自动触发熔断
+        if proxy_state.get_current_cost() > limit {
+            proxy_state.trigger_circuit_breaker(format!("Budget limit lowered below current cost"));
+        }
+        
+        Ok(format!("Budget limit set to ${:.2}", limit))
     } else {
         Err("Proxy is not running".to_string())
     }

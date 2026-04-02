@@ -2,6 +2,7 @@
 import Sidebar from '@/components/Sidebar.vue'
 import GatewayStatusBar from '@/components/GatewayStatusBar.vue'
 import HITLBar from '@/components/HITLBar.vue'
+import CircuitBreakerModal from '@/components/CircuitBreakerModal.vue'
 import { useAgentStore } from '@/stores/agents'
 import { useSettingsStore } from '@/stores/settings'
 import { useProxyStore } from '@/stores/proxy'
@@ -125,6 +126,9 @@ onMounted(async () => {
         </transition>
       </router-view>
     </main>
+
+    <!-- Circuit Breaker Modal -->
+    <CircuitBreakerModal />
   </template>
 </template>
 

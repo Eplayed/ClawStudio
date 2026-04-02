@@ -415,12 +415,24 @@ fn extract_uptime(body: &str) -> Option<u64> {
 
 /// Get Gateway status (alias for gateway_health with more details)
 #[tauri::command]
-pub async fn gateway_status(port: Option<u16>) -> Result<serde_json::Value, String> {
+pub async fn gateway_status(
+    port: Option<u16>,
+    proxy_state: tauri::State<'_, crate::proxy::ProxyServerState>,
+) -> Result<serde_json::Value, String> {
     let health = gateway_health(port).await?;
     let info = get_gateway_info().ok();
     
+    // Get proxy status
+    let proxy_status = crate::proxy::get_proxy_status(proxy_state);
+    
     Ok(serde_json::json!({
-        "health": health,
+        "gateway": {
+            "running": health.running,
+            "port": health.port,
+            "version": health.version,
+            "uptime_sec": health.uptime_sec,
+        },
+        "proxy": proxy_status,
         "info": info,
     }))
 }

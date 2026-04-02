@@ -36,7 +36,7 @@ PRD v2.1 核心变更：从"标准流劫持 + Mock 数据"转向"本地反向代
 - [x] 添加依赖: hyper, tower, http-body-util
 - [x] 创建 proxy_state.rs 状态管理
 
-**文件:** 
+**文件:**
 - `src-tauri/src/proxy.rs` - 代理核心模块 (~400行)
 - `src-tauri/src/proxy_state.rs` - 状态管理 (~150行)
 
@@ -134,7 +134,7 @@ async fn forward_to_anthropic(
 - 不泄露密钥：严禁打印 API Key / 完整请求体（必要时只打印字段摘要）。
 
 测试要求
-- 至少新增/保持 1 个“路由分发/健康检查”相关的测试或验证脚本（在 src-tauri/src/tests/proxy_tests.rs 或 docs 中补充）。
+- 至少新增/保持 1 个"路由分发/健康检查"相关的测试或验证脚本（在 src-tauri/src/tests/proxy_tests.rs 或 docs 中补充）。
 ```
 
 #### Task 1.3: 响应解析与数据提取 ✅已完成
@@ -159,7 +159,7 @@ async fn forward_to_anthropic(
 - 事件名稳定：proxy:token_usage / proxy:thinking / proxy:action / proxy:hitl_request / proxy:circuit_breaker。
 
 测试要求
-- 增加“响应解析”的单元测试（对固定 JSON 样本做 parse + 断言抽取字段/分支路径）。
+- 增加"响应解析"的单元测试（对固定 JSON 样本做 parse + 断言抽取字段/分支路径）。
 ```
 
 **事件定义:**
@@ -201,15 +201,15 @@ pub async fn configure_openclaw_proxy(
     let config_path = dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".openclaw/openclaw.json");
-    
+
     // 读取现有配置
     let mut config: serde_json::Value = ...;
-    
+
     // 修改 API base URL
     config["agents"]["defaults"]["api_base"] = serde_json::json!(
         format!("http://127.0.0.1:{}/v1", proxy_port)
     );
-    
+
     // 写入配置
     std::fs::write(&config_path, serde_json::to_string_pretty(&config)?)?;
     Ok(())
@@ -230,7 +230,7 @@ pub async fn configure_openclaw_proxy(
 
 完成标准（验收）
 - 调用 configure_openclaw_proxy(18788) 后，~/.openclaw/openclaw.json 的 agents.defaults.api_base 指向 http://127.0.0.1:18788/v1。
-- 若实现“API Key/model 参数透传”：明确写入字段、覆盖策略、回滚策略，并补充单元测试。
+- 若实现"API Key/model 参数透传"：明确写入字段、覆盖策略、回滚策略，并补充单元测试。
 ```
 
 #### Task 2.2: 修改 Setup Wizard 前端 ⏳待开始
@@ -243,7 +243,7 @@ pub async fn configure_openclaw_proxy(
 
 **AI 提示词（复制给执行 AI）**
 ```text
-你需要在 Setup Wizard 的 Step 7（LaunchGateway）中加入“代理配置与运行状态”步骤。
+你需要在 Setup Wizard 的 Step 7（LaunchGateway）中加入"代理配置与运行状态"步骤。
 
 目标
 1) 用户启动 Gateway 后，自动调用后端 configure_openclaw_proxy(18788)。
@@ -256,18 +256,18 @@ pub async fn configure_openclaw_proxy(
 - src-tauri/src/proxy.rs（start_proxy / get_proxy_status）
 
 验收标准
-- Setup Step 7 能看到“代理配置完成/失败”提示。
+- Setup Step 7 能看到"代理配置完成/失败"提示。
 - 成功后 get_proxy_status 显示 running=true。
 - 前端验证：npm run build 通过。
 ```
 
 ### Phase 3: Gateway 集成 (P0)
 
-#### Task 3.1: 修改 gateway.rs ⏳进行中
+#### Task 3.1: 修改 gateway.rs ✅已完成
 - [x] `start_gateway` 同时启动代理服务
 - [x] `stop_gateway` 同时停止代理服务
-- [ ] `gateway_status` 返回代理状态
-- [ ] 添加代理状态到 GatewayState
+- [x] `gateway_status` 返回代理状态
+- [x] 添加代理状态到 GatewayState
 
 **修改内容:**
 ```rust
@@ -308,10 +308,10 @@ pub struct GatewayStatus {
 - 后端验证：cargo test 全绿。
 ```
 
-#### Task 3.2: 添加代理状态管理 ⏳进行中
+#### Task 3.2: 添加代理状态管理 ✅已完成
 - [x] 创建代理状态结构体（使用 Tauri State 管理）
 - [x] 存储累计费用、熔断状态、待审批 HITL 队列
-- [ ] 提供完整的 Tauri 命令查询状态（含 total_cost / budget_limit / pending_hitl 等）
+- [x] 提供完整的 Tauri 命令查询状态（含 total_cost / budget_limit / pending_hitl 等）
 
 **Tauri 命令:**
 ```rust
@@ -335,7 +335,7 @@ pub async fn set_budget_limit(limit: f64, state: State<'_, ProxyState>) -> Resul
 
 **AI 提示词（复制给执行 AI）**
 ```text
-你需要把 get_proxy_status 扩展为“完整状态查询”，满足 UI 与 gateway_status 聚合展示需求。
+你需要把 get_proxy_status 扩展为"完整状态查询"，满足 UI 与 gateway_status 聚合展示需求。
 
 必读文件
 - src-tauri/src/proxy.rs（ProxyServerState / get_proxy_status）
@@ -484,12 +484,12 @@ const actionEntries = computed(() => proxyStore.actionLog)
 ```rust
 const DANGEROUS_TOOLS: &[&str] = &[
     "bash",
-    "str_replace_editor", 
+    "str_replace_editor",
     "str_replace",
     "execute_script",
     "script",
     "run_command",
-    "file_write", 
+    "file_write",
     "write_file",
     "create_file",
 ];
@@ -501,7 +501,7 @@ fn is_dangerous_tool(tool_name: &str) -> bool {
 
 **AI 提示词（复制给执行 AI）**
 ```text
-你需要维护“高危工具”检测列表与判定逻辑，并保证命中后能触发 HITL 流程。
+你需要维护"高危工具"检测列表与判定逻辑，并保证命中后能触发 HITL 流程。
 
 必读文件
 - src-tauri/src/proxy.rs（tool_use 解析 + HITL 分支）
@@ -546,7 +546,7 @@ let response = tokio::time::timeout(Duration::from_secs(30), rx).await;
 
 **AI 提示词（复制给执行 AI）**
 ```text
-你需要保证 HITL 的“挂起-放行/拒绝-超时”状态机可靠，不会卡死请求或造成内存泄漏。
+你需要保证 HITL 的"挂起-放行/拒绝-超时"状态机可靠，不会卡死请求或造成内存泄漏。
 
 必读文件
 - src-tauri/src/proxy.rs（HITL oneshot / timeout / 构造拒绝响应）
@@ -558,9 +558,10 @@ let response = tokio::time::timeout(Duration::from_secs(30), rx).await;
 - timeout：默认 30s 自动拒绝，并清理 pending。
 ```
 
-#### Task 5.3: 改造 HITLBar.vue ⏳进行中
+#### Task 5.3: 改造 HITLBar.vue ✅已完成
 - [x] 监听 `proxy:hitl_request` 事件
-- [ ] 显示审批 Modal
+- [x] 显示审批 Modal（展示 tool + params）
+- [x] 可填拒绝理由
 - [x] 发送用户决定到后端
 
 **新增 Tauri 命令:**
@@ -576,8 +577,8 @@ pub async fn hitl_approve(request_id: String, state: State<'_, ProxyState>) -> R
 #[tauri::command]
 pub async fn hitl_reject(request_id: String, correction: Option<String>, state: State<'_, ProxyState>) -> Result<(), String> {
     if let Some(req) = state.hitl_pending.lock().await.remove(&request_id) {
-        let _ = req.response_tx.send(HitlResponse::Reject { 
-            error_message: correction.unwrap_or_else(|| "User rejected".to_string()) 
+        let _ = req.response_tx.send(HitlResponse::Reject {
+            error_message: correction.unwrap_or_else(|| "User rejected".to_string())
         });
     }
     Ok(())
@@ -586,7 +587,7 @@ pub async fn hitl_reject(request_id: String, correction: Option<String>, state: 
 
 **AI 提示词（复制给执行 AI）**
 ```text
-你需要把 HITLBar 做成“真正的审批 Modal/交互”，而不仅是提示条。
+你需要把 HITLBar 做成"真正的审批 Modal/交互"，而不仅是提示条。
 
 现状
 - 前端已能监听 proxy:hitl_request，并调用 hitl_approve/hitl_reject。
@@ -622,7 +623,7 @@ fn construct_rejection_response(tool: &str) -> String {
 
 **AI 提示词（复制给执行 AI）**
 ```text
-你需要确保拒绝响应的 JSON 结构对 OpenClaw/客户端“可预期且安全”，不会导致重试风暴或执行继续进行。
+你需要确保拒绝响应的 JSON 结构对 OpenClaw/客户端"可预期且安全"，不会导致重试风暴或执行继续进行。
 
 必读文件
 - src-tauri/src/proxy.rs（construct_rejection_response / HITL reject 分支）
@@ -652,7 +653,7 @@ fn check_circuit_breaker(state: &ProxyState) -> bool {
 fn trigger_circuit_breaker(state: &ProxyState, app_handle: &AppHandle) {
     let current = state.total_cost.load(Ordering::Relaxed);
     let limit = state.budget_limit.load(Ordering::Relaxed);
-    
+
     // 发送熔断事件
     let _ = app_handle.emit("proxy:circuit_breaker", serde_json::json!({
         "reason": "Budget limit exceeded",
@@ -677,11 +678,11 @@ fn trigger_circuit_breaker(state: &ProxyState, app_handle: &AppHandle) {
 - cargo test 全绿（至少覆盖熔断阈值测试）。
 ```
 
-#### Task 6.2: 前端熔断通知 ⏳待开始
-- [ ] 监听 `proxy:circuit_breaker` 事件
-- [ ] 显示全屏警告 Modal
-- [ ] 提供恢复选项（增加预算/重置）
-- [ ] 阻止新请求发送
+#### Task 6.2: 前端熔断通知 ✅已完成
+- [x] 监听 `proxy:circuit_breaker` 事件
+- [x] 显示全屏警告 Modal
+- [x] 提供恢复选项（增加预算/重置）
+- [x] 阻止新请求发送
 
 **组件:** 修改 `src/App.vue` 或新建 `CircuitBreakerModal.vue`
 ```vue
@@ -722,7 +723,7 @@ fn trigger_circuit_breaker(state: &ProxyState, app_handle: &AppHandle) {
 ### Phase 7: 测试与优化 (P1)
 
 #### Task 7.1: 单元测试 ⏳进行中
-- [ ] 测试响应解析逻辑
+- [x] 测试响应解析逻辑
 - [x] 测试费用计算
 - [ ] 测试 HITL 检测
 - [x] 测试熔断阈值
@@ -775,7 +776,7 @@ curl -X POST http://127.0.0.1:18788/v1/messages \
 
 **AI 提示词（复制给执行 AI）**
 ```text
-你需要补齐集成测试与可复现的验证脚本，确保 v2.1 的“代理 + HITL + 熔断”链路可回归。
+你需要补齐集成测试与可复现的验证脚本，确保 v2.1 的"代理 + HITL + 熔断"链路可回归。
 
 目标
 - 至少提供 1 个不依赖真实密钥也能跑通的集成测试/脚本（例如 /health、/status）。
@@ -838,11 +839,12 @@ src/
 ├── components/
 │   ├── FuelGauge.vue          # 使用 proxy store
 │   ├── ThoughtLog.vue         # 使用 proxy store
-│   ├── HITLBar.vue             # + HITL 事件
-│   └── GatewayStatusBar.vue   # + 代理状态
+│   ├── HITLBar.vue             # + HITL Modal 审批
+│   ├── GatewayStatusBar.vue   # + 代理状态
+│   └── CircuitBreakerModal.vue # + 熔断通知 Modal
 ├── views/
 │   └── CostMonitor.vue         # 使用 proxy store
-└── App.vue                     # 初始化 proxy store + 配置代理劫持
+└── App.vue                     # 初始化 proxy store + 配置代理劫持 + CircuitBreakerModal
 ```
 
 ## 依赖添加
@@ -870,9 +872,12 @@ tokio-util = { version = "0.7", features = ["io"] }
 - [x] ✅ Task 1.2 - 实现 HTTP 代理服务
 - [x] ✅ Task 1.3 - 响应解析与数据提取（Token/Thinking/Action 事件）
 - [x] ✅ Task 2.1 - 配置劫持（configure_openclaw_proxy）
-- [x] ✅ Task 3.1 - Gateway 启动/停止联动 Proxy（gateway_status 扩展待补）
+- [x] ✅ Task 3.1 - Gateway 启动/停止联动 Proxy + gateway_status 返回代理状态
 - [x] ✅ Task 4.1/4.2/4.3 - 前端事件监听与 UI 适配（proxy store + FuelGauge + ThoughtLog）
-- [x] ✅ Task 5.1/5.2/5.4 - HITL 检测/挂起/拒绝响应（审批 Modal 待补）
+- [x] ✅ Task 5.1/5.2/5.4 - HITL 检测/挂起/拒绝响应
+- [x] ✅ Task 5.3 - HITLBar Modal 审批 UI（拒绝理由输入）
 - [x] ✅ Task 6.1 - 熔断逻辑（402 + 事件）
+- [x] ✅ Task 6.2 - CircuitBreakerModal 熔断通知 UI
 - [x] ✅ Task 7.1（部分）- 单元测试：费用计算、熔断阈值
-- [ ] ⏳ **下一步: Task 2.2 / Task 3.1(gateway_status) / Task 5.3(Modal) / Task 6.2 / Task 7.2**
+- [x] ⏳ **新增: set_proxy_budget_limit 命令**
+- [ ] ⏳ **下一步: Task 2.2 (Setup Wizard 前端) / Task 7.2 (集成测试)**
