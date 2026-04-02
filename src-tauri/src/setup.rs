@@ -220,6 +220,47 @@ pub async fn configure_openclaw(config: SetupConfig) -> Result<String, String> {
 }
 
 #[tauri::command]
+pub async fn configure_openclaw_proxy(
+    proxy_port: u16,
+) -> Result<(), String> {
+    let config_path = dirs::home_dir()
+        .map(|h| h.join(".openclaw").join("openclaw.json"))
+        .ok_or("Cannot determine home directory")?;
+    
+    // 读取现有配置
+    let mut config: serde_json::Value = if config_path.exists() {
+        let content = std::fs::read_to_string(&config_path)
+            .map_err(|e| format!("Failed to read config: {}", e))?;
+        serde_json::from_str(&content).unwrap_or(serde_json::json!({}))
+    } else {
+        serde_json::json!({})
+    };
+    
+    // 确保结构存在
+    if !config["agents"].is_object() {
+        config["agents"] = serde_json::json!({});
+    }
+    if !config["agents"]["defaults"].is_object() {
+        config["agents"]["defaults"] = serde_json::json!({});
+    }
+    
+    // 修改 API base URL
+    config["agents"]["defaults"]["api_base"] = serde_json::json!(
+        format!("http://127.0.0.1:{}/v1", proxy_port)
+    );
+    
+    // 写入配置
+    if let Some(parent) = config_path.parent() {
+        std::fs::create_dir_all(parent).ok();
+    }
+    
+    std::fs::write(&config_path, serde_json::to_string_pretty(&config).unwrap())
+        .map_err(|e| format!("Failed to write config: {}", e))?;
+        
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn uninstall_openclaw(scope: UninstallScope) -> Result<String, String> {
     log::info!("Uninstalling OpenClaw...");
 
@@ -251,16 +292,16 @@ pub async fn check_environment() -> Result<EnvStatus, String> {
 }
 
 #[tauri::command]
-pub async fn start_gateway_from_setup(port: Option<u16>) -> Result<String, String> {
+pub async fn start_gateway_from_setup(
+    app_handle: tauri::AppHandle,
+    state: tauri::State<'_, crate::gateway::GatewayState>,
+    proxy_state: tauri::State<'_, crate::proxy::ProxyServerState>,
+    port: Option<u16>,
+) -> Result<String, String> {
     let port = port.unwrap_or(18789);
-    let output = StdCommand::new("openclaw")
-        .args(["gateway", "start", "--port", &port.to_string()])
-        .output();
-
-    match output {
-        Ok(o) if o.status.success() => Ok(format!("Gateway started on port {}", port)),
-        Ok(o) => Err(String::from_utf8_lossy(&o.stderr).to_string()),
-        Err(e) => Err(format!("Failed to start gateway: {}", e)),
+    match crate::gateway::start_gateway(app_handle, state, proxy_state, Some(port)).await {
+        Ok(_) => Ok(format!("Gateway started on port {}", port)),
+        Err(e) => Err(e),
     }
 }
 

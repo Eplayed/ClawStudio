@@ -1,16 +1,14 @@
 <script setup lang="ts">
 /**
  * ThoughtLog.vue - 思维流日志面板
- * 监听 eventLog，按 Think/Action/Observe/Error 分类渲染
+ * 监听 proxyStore 的 thinkingLog 和 actionLog
  */
 import { ref, computed, watch, nextTick } from 'vue'
-import { useAgentStore } from '@/stores/agents'
-import type { ParsedEvent, EventType } from '@/utils/eventParser'
-import { highlightToolCalls } from '@/utils/eventParser'
+import { useProxyStore } from '@/stores/proxy'
 
-const agentStore = useAgentStore()
+const proxyStore = useProxyStore()
 
-type FilterType = 'all' | 'think' | 'action' | 'observe' | 'error'
+type FilterType = 'all' | 'think' | 'action'
 
 const activeFilter = ref<FilterType>('all')
 
@@ -18,13 +16,20 @@ const filters: { key: FilterType; label: string; color: string }[] = [
   { key: 'all',    label: 'ALL',   color: 'var(--text-dim)' },
   { key: 'think',  label: 'Think', color: '#a78bfa' },
   { key: 'action', label: 'Act',   color: 'var(--cyan)' },
-  { key: 'observe',label: 'Obs',   color: 'var(--amber)' },
-  { key: 'error',  label: 'Err',   color: 'var(--red)' },
 ]
 
+// 合并 thinkingLog 和 actionLog 并按 step 排序
+const mergedEvents = computed(() => {
+  const events = [
+    ...proxyStore.thinkingLog.map(e => ({ type: 'think', text: e.text, step: e.step, timestamp: e.timestamp || '--:--:--' })),
+    ...proxyStore.actionLog.map(e => ({ type: 'action', text: `Call tool: ${e.tool}\n${JSON.stringify(e.params, null, 2)}`, step: e.step, timestamp: e.timestamp || '--:--:--' }))
+  ]
+  return events.sort((a, b) => a.step - b.step)
+})
+
 const filteredEvents = computed(() => {
-  if (activeFilter.value === 'all') return agentStore.eventLog
-  return agentStore.eventLog.filter(
+  if (activeFilter.value === 'all') return mergedEvents.value
+  return mergedEvents.value.filter(
     (e) => e.type === activeFilter.value
   )
 })
@@ -33,7 +38,7 @@ const filteredEvents = computed(() => {
 const logContainer = ref<HTMLElement | null>(null)
 
 watch(
-  () => agentStore.eventLog.length,
+  () => mergedEvents.value.length,
   async () => {
     await nextTick()
     if (logContainer.value) {
@@ -51,9 +56,6 @@ function badgeClass(type: string | undefined) {
     'log-badge': true,
     think:   type === 'think',
     action:  type === 'action',
-    observe: type === 'observe',
-    error:   type === 'error',
-    unknown: type === 'unknown',
   }
 }
 
@@ -64,17 +66,10 @@ function entryClass(type: string | undefined) {
   }
 }
 
-function formatTime(ts: string) {
-  return ts
-}
-
-function renderContent(event: { text?: string; tool?: string }): string {
+function renderContent(event: { text?: string }): string {
   if (!event.text) return ''
-  if (event.tool) {
-    return highlightToolCalls(event.text)
-  }
-  return event.text.length > 120
-    ? event.text.slice(0, 120) + '…'
+  return event.text.length > 200
+    ? event.text.slice(0, 200) + '…'
     : event.text
 }
 </script>

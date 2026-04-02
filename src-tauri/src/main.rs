@@ -76,6 +76,7 @@ fn main() {
             setup::install_node,
             setup::install_openclaw,
             setup::configure_openclaw,
+            setup::configure_openclaw_proxy,
             setup::start_gateway_from_setup,
             setup::uninstall_openclaw,
             // Gateway Manager
@@ -92,6 +93,8 @@ fn main() {
             proxy::stop_proxy,
             proxy::get_proxy_status,
             proxy::reset_proxy_cost,
+            proxy::hitl_approve,
+            proxy::hitl_reject,
             // Channel Management
             channels::list_channels,
             channels::add_channel,

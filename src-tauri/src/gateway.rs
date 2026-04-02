@@ -58,7 +58,9 @@ impl Default for GatewayState {
 /// Start the Gateway daemon
 #[tauri::command]
 pub async fn start_gateway(
+    app_handle: tauri::AppHandle,
     state: tauri::State<'_, GatewayState>,
+    proxy_state: tauri::State<'_, crate::proxy::ProxyServerState>,
     port: Option<u16>,
 ) -> Result<GatewayHealth, String> {
     let port = port.unwrap_or(18789);
@@ -66,6 +68,8 @@ pub async fn start_gateway(
     // Check if already running
     if let Ok(health) = check_health(port).await {
         if health.running {
+            // Also ensure proxy is running
+            let _ = crate::proxy::start_proxy(app_handle, proxy_state, Some(18788), Some(100.0), Some(true)).await;
             return Ok(health);
         }
     }
@@ -88,6 +92,9 @@ pub async fn start_gateway(
     // Store process handle
     *state.process.lock().await = Some(child);
     *state.port.lock().await = port;
+    
+    // Start proxy server alongside gateway
+    let _ = crate::proxy::start_proxy(app_handle, proxy_state, Some(18788), Some(100.0), Some(true)).await;
 
     // Wait for gateway to be ready
     for i in 0..30 {
@@ -110,8 +117,12 @@ pub async fn start_gateway(
 #[tauri::command]
 pub async fn stop_gateway(
     state: tauri::State<'_, GatewayState>,
+    proxy_state: tauri::State<'_, crate::proxy::ProxyServerState>,
 ) -> Result<(), String> {
     log::info!("Stopping Gateway...");
+
+    // Stop proxy server
+    let _ = crate::proxy::stop_proxy(proxy_state).await;
 
     // Kill stored process if any
     if let Some(mut child) = state.process.lock().await.take() {
@@ -143,14 +154,16 @@ pub async fn stop_gateway(
 /// Restart the Gateway daemon
 #[tauri::command]
 pub async fn restart_gateway(
+    app_handle: tauri::AppHandle,
     state: tauri::State<'_, GatewayState>,
+    proxy_state: tauri::State<'_, crate::proxy::ProxyServerState>,
     port: Option<u16>,
 ) -> Result<GatewayHealth, String> {
     log::info!("Restarting Gateway...");
 
-    stop_gateway(state.clone()).await?;
+    stop_gateway(state.clone(), proxy_state.clone()).await?;
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-    start_gateway(state, port).await
+    start_gateway(app_handle, state, proxy_state, port).await
 }
 
 /// Check Gateway health via HTTP

@@ -6,16 +6,18 @@
 import { ref, computed } from 'vue'
 import { useAgentStore } from '@/stores/agents'
 import { useSettingsStore } from '@/stores/settings'
+import { useProxyStore } from '@/stores/proxy'
 import FuelGauge from '@/components/FuelGauge.vue'
 import TokenBreakdown from '@/components/TokenBreakdown.vue'
 import AgentCostTable from '@/components/AgentCostTable.vue'
 
 const agentStore = useAgentStore()
 const settingsStore = useSettingsStore()
+const proxy = useProxyStore()
 
 // Budget
-const budgetLimit = computed(() => settingsStore.budgetDefault)
-const currentCost = computed(() => agentStore.totalCostToday)
+const budgetLimit = computed(() => proxy.budgetLimit)
+const currentCost = computed(() => proxy.totalCost)
 
 // Token breakdown (mock for now, will connect to real data)
 const inputTokens = computed(() => agentStore.agents.reduce((sum, a) => sum + (a.tokensUsed || 0) * 0.3, 125000))
@@ -50,9 +52,12 @@ const displayAgents = computed(() => {
   <div class="page">
     <header class="topbar">
       <div class="page-title">💰 烧钱计算器 Cost Monitor</div>
-      <div class="status-chip amber">
-        <span class="icon">🔥</span>
-        实时计费中
+      <div style="display: flex; align-items: center; gap: 12px;">
+        <button class="btn btn-outline" @click="proxy.resetCost()" style="font-size: 12px; padding: 4px 10px; border-radius: 4px; border: 1px solid var(--border); background: var(--bg-card); cursor: pointer; color: inherit;">重置当前计数</button>
+        <div class="status-chip amber">
+          <span class="icon">🔥</span>
+          实时计费中
+        </div>
       </div>
     </header>
 
@@ -61,7 +66,7 @@ const displayAgents = computed(() => {
         <!-- Left: Fuel Gauge -->
         <div class="gauge-column">
           <div class="gauge-panel">
-            <FuelGauge :current="currentCost || 2.35" :limit="budgetLimit" />
+            <FuelGauge :current="currentCost" :limit="budgetLimit" />
           </div>
         </div>
 

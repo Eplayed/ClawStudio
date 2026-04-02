@@ -11,3 +11,5 @@ mod audit_tests;
 mod template_tests;
 #[cfg(test)]
 mod keychain_tests;
+#[cfg(test)]
+mod proxy_tests;

@@ -26,8 +26,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 /// 启动代理服务器
 pub async fn start_proxy_server(
     port: u16,
-    config: ProxyConfig,
-    event_sender: mpsc::Sender<ProxyEvent>,
+    state: Arc<ProxyState>,
 ) -> Result<(), String> {
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
     
@@ -39,12 +38,11 @@ pub async fn start_proxy_server(
     println!("[Proxy] Server listening on http://{}", addr);
     
     // 更新状态
-    let state = Arc::new(ProxyState::new(config, event_sender.clone()));
     state.running.store(true, std::sync::atomic::Ordering::Relaxed);
     state.port.store(port, std::sync::atomic::Ordering::Relaxed);
     
     // 发送启动事件
-    let _ = event_sender.send(ProxyEvent::StatusChange {
+    let _ = state.event_sender.send(ProxyEvent::StatusChange {
         running: true,
         port,
     }).await;
@@ -53,13 +51,13 @@ pub async fn start_proxy_server(
     loop {
         match listener.accept().await {
             Ok((stream, client_addr)) => {
-                let state = state.clone();
-                let event_sender = event_sender.clone();
+                let state_clone = state.clone();
+                let event_sender_clone = state.event_sender.clone();
                 
                 tokio::spawn(async move {
                     let io = TokioIo::new(stream);
                     let service = service_fn(move |req| {
-                        handle_request(req, state.clone(), event_sender.clone())
+                        handle_request(req, state_clone.clone(), event_sender_clone.clone())
                     });
                     
                     if let Err(err) = http1::Builder::new()
@@ -99,8 +97,8 @@ async fn handle_request(
     // 检查熔断状态
     if state.is_circuit_broken() {
         let current = state.get_current_cost();
-        let limit = state.budget_limit.load(std::sync::atomic::Ordering::Relaxed);
-        return Ok(Response::builder().status(hyper::StatusCode::TOO_MANY_REQUESTS)
+        let limit = state.budget_limit.load(std::sync::atomic::Ordering::Relaxed) as f64 / 10000.0;
+        return Ok(Response::builder().status(hyper::StatusCode::PAYMENT_REQUIRED)
             .body(Full::new(Bytes::from(format!(
                 "Circuit breaker active: budget exceeded (${:.2}/${:.2})",
                 current, limit
@@ -155,6 +153,33 @@ async fn handle_request(
                 .unwrap())
         }
     }
+}
+
+const DANGEROUS_TOOLS: &[&str] = &[
+    "bash",
+    "str_replace_editor", 
+    "str_replace",
+    "execute_script",
+    "script",
+    "run_command",
+    "file_write", 
+    "write_file",
+    "create_file",
+];
+
+fn is_dangerous_tool(tool_name: &str) -> bool {
+    DANGEROUS_TOOLS.iter().any(|&d| tool_name.contains(d))
+}
+
+fn construct_rejection_response(tool: &str, error_message: &str) -> String {
+    serde_json::json!({
+        "type": "error",
+        "error": {
+            "type": "api_error",
+            "message": format!("Tool '{}' execution rejected: {}", tool, error_message)
+        },
+        "stop_reason": "tool_use_blocked"
+    }).to_string()
 }
 
 /// 处理 Anthropic Messages API 请求
@@ -231,6 +256,10 @@ async fn handle_anthropic_messages(
             }
             
             // 提取思维流和动作流
+            let mut hitl_paused = false;
+            let mut pending_hitl_tool = None;
+            let mut pending_hitl_params = None;
+
             if let Some(stop_reason) = response_json.get("stop_reason").and_then(|v| v.as_str()) {
                 if stop_reason == "tool_use" {
                     // 处理工具调用
@@ -253,9 +282,17 @@ async fn handle_anthropic_messages(
                                             let step = state.next_action_step();
                                             let _ = event_sender.send(ProxyEvent::Action {
                                                 tool: tool.to_string(),
-                                                params,
+                                                params: params.clone(),
                                                 step,
                                             }).await;
+
+                                            // HITL 拦截检测
+                                            let hitl_enabled = state.config.lock().await.hitl_enabled;
+                                            if hitl_enabled && is_dangerous_tool(tool) {
+                                                hitl_paused = true;
+                                                pending_hitl_tool = Some(tool.to_string());
+                                                pending_hitl_params = Some(params);
+                                            }
                                         }
                                     }
                                     _ => {}
@@ -266,6 +303,67 @@ async fn handle_anthropic_messages(
                 }
             }
             
+            // 如果触发 HITL
+            if hitl_paused {
+                if let (Some(tool), Some(params)) = (pending_hitl_tool, pending_hitl_params) {
+                    let request_id = uuid::Uuid::new_v4().to_string();
+                    let (tx, rx) = tokio::sync::oneshot::channel::<crate::proxy_state::HitlResponse>();
+                    
+                    state.add_hitl_request(crate::proxy_state::HitlRequest {
+                        request_id: request_id.clone(),
+                        tool: tool.clone(),
+                        params: params.clone(),
+                        created_at: tokio::time::Instant::now(),
+                        response_tx: tx,
+                    }).await;
+
+                    let _ = event_sender.send(ProxyEvent::HitlRequest {
+                        request_id: request_id.clone(),
+                        tool: tool.clone(),
+                        params: params.clone(),
+                    }).await;
+
+                    // 等待用户响应或超时 (默认30秒)
+                    match tokio::time::timeout(std::time::Duration::from_secs(30), rx).await {
+                        Ok(Ok(crate::proxy_state::HitlResponse::Approve)) => {
+                            // 放行，继续返回原本响应
+                            let _ = event_sender.send(ProxyEvent::HitlResponse {
+                                request_id,
+                                approved: true,
+                                response: None,
+                            }).await;
+                        }
+                        Ok(Ok(crate::proxy_state::HitlResponse::Reject { error_message })) => {
+                            // 拒绝，返回伪造的错误响应
+                            let _ = event_sender.send(ProxyEvent::HitlResponse {
+                                request_id,
+                                approved: false,
+                                response: None,
+                            }).await;
+                            let reject_response = construct_rejection_response(&tool, &error_message);
+                            return Ok(Response::builder().status(hyper::StatusCode::OK)
+                                .header("Content-Type", "application/json")
+                                .body(Full::new(Bytes::from(reject_response)))
+                                .unwrap());
+                        }
+                        _ => {
+                            // 超时或通道关闭
+                            let _ = event_sender.send(ProxyEvent::HitlResponse {
+                                request_id: request_id.clone(),
+                                approved: false,
+                                response: None,
+                            }).await;
+                            let _ = state.remove_hitl_request(&request_id).await;
+                            let reject_response = construct_rejection_response(&tool, "Timeout");
+                            return Ok(Response::builder().status(hyper::StatusCode::OK)
+                                .header("Content-Type", "application/json")
+                                .body(Full::new(Bytes::from(reject_response)))
+                                .unwrap());
+                        }
+                    }
+                }
+            }
+
             Ok(Response::builder().status(hyper::StatusCode::OK)
                 .header("Content-Type", "application/json")
                 .body(Full::new(response))
@@ -469,14 +567,16 @@ pub struct ProxyServerState {
     pub shutdown_tx: Arc<tokio::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>>,
     pub running: Arc<std::sync::atomic::AtomicBool>,
     pub port: Arc<std::sync::atomic::AtomicU16>,
+    pub proxy_state: Arc<tokio::sync::Mutex<Option<Arc<ProxyState>>>>,
 }
 
 impl Default for ProxyServerState {
     fn default() -> Self {
         Self {
             running: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-        shutdown_tx: Arc::new(tokio::sync::Mutex::new(None)),
+            shutdown_tx: Arc::new(tokio::sync::Mutex::new(None)),
             port: Arc::new(std::sync::atomic::AtomicU16::new(18788)),
+            proxy_state: Arc::new(tokio::sync::Mutex::new(None)),
         }
     }
 }
@@ -515,6 +615,11 @@ pub async fn start_proxy(
         request_timeout_secs: 120,
     };
     
+    let proxy_state = Arc::new(ProxyState::new(config, event_tx));
+    let mut state_lock = state.proxy_state.lock().await;
+    *state_lock = Some(proxy_state.clone());
+    drop(state_lock);
+
     println!("[Proxy] Starting proxy server on port {}", port);
     
     // 启动服务器
@@ -525,6 +630,32 @@ pub async fn start_proxy(
     let app_handle_clone = app_handle.clone();
     tokio::spawn(async move {
         while let Some(event) = event_rx.recv().await {
+            match &event {
+                ProxyEvent::TokenUsage { .. } => {
+                    let _ = app_handle_clone.emit("proxy:token_usage", &event);
+                }
+                ProxyEvent::Thinking { .. } => {
+                    let _ = app_handle_clone.emit("proxy:thinking", &event);
+                }
+                ProxyEvent::Action { .. } => {
+                    let _ = app_handle_clone.emit("proxy:action", &event);
+                }
+                ProxyEvent::HitlRequest { .. } => {
+                    let _ = app_handle_clone.emit("proxy:hitl_request", &event);
+                }
+                ProxyEvent::HitlResponse { .. } => {
+                    let _ = app_handle_clone.emit("proxy:hitl_response", &event);
+                }
+                ProxyEvent::CircuitBreaker { .. } => {
+                    let _ = app_handle_clone.emit("proxy:circuit_breaker", &event);
+                }
+                ProxyEvent::StatusChange { .. } => {
+                    let _ = app_handle_clone.emit("proxy:status_change", &event);
+                }
+                ProxyEvent::Error { .. } => {
+                    let _ = app_handle_clone.emit("proxy:error", &event);
+                }
+            }
             let _ = app_handle_clone.emit("proxy:event", event);
         }
     });
@@ -534,7 +665,7 @@ pub async fn start_proxy(
     tokio::spawn(async move {
         // 使用优雅 shutdown
         tokio::select! {
-            result = start_proxy_server(port, config, event_tx) => {
+            result = start_proxy_server(port, proxy_state) => {
                 if let Err(e) = result {
                     println!("[Proxy] Server error: {}", e);
                 }
@@ -575,9 +706,37 @@ pub fn get_proxy_status(state: State<'_, ProxyServerState>) -> serde_json::Value
     })
 }
 
+/// 触发 HITL 放行
+#[tauri::command]
+pub async fn hitl_approve(request_id: String, state: State<'_, ProxyServerState>) -> Result<(), String> {
+    if let Some(proxy_state) = state.proxy_state.lock().await.as_ref() {
+        if let Some(req) = proxy_state.hitl_pending.lock().await.remove(&request_id) {
+            let _ = req.response_tx.send(crate::proxy_state::HitlResponse::Approve);
+        }
+    }
+    Ok(())
+}
+
+/// 触发 HITL 拒绝
+#[tauri::command]
+pub async fn hitl_reject(request_id: String, correction: Option<String>, state: State<'_, ProxyServerState>) -> Result<(), String> {
+    if let Some(proxy_state) = state.proxy_state.lock().await.as_ref() {
+        if let Some(req) = proxy_state.hitl_pending.lock().await.remove(&request_id) {
+            let error_message = correction.unwrap_or_else(|| "User rejected this action".to_string());
+            let _ = req.response_tx.send(crate::proxy_state::HitlResponse::Reject { error_message });
+        }
+    }
+    Ok(())
+}
+
 /// 重置费用计数
 #[tauri::command]
-pub fn reset_proxy_cost() -> Result<String, String> {
-    // TODO: 连接到实际的 ProxyState
-    Ok("Cost reset (not implemented)".to_string())
+pub async fn reset_proxy_cost(state: State<'_, ProxyServerState>) -> Result<String, String> {
+    if let Some(proxy_state) = state.proxy_state.lock().await.as_ref() {
+        proxy_state.reset_cost();
+        proxy_state.reset_circuit_breaker();
+        Ok("Cost reset successfully".to_string())
+    } else {
+        Err("Proxy is not running".to_string())
+    }
 }

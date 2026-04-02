@@ -32,8 +32,7 @@ mod tests {
         match output {
             Ok(o) if o.status.success() => {
                 let version = String::from_utf8_lossy(&o.stdout);
-                let version_num: f32 = version.trim().parse().unwrap_or(0.0);
-                assert!(version_num > 0.0, "npm version should be positive");
+                assert!(!version.trim().is_empty(), "npm version should not be empty");
                 println!("✅ npm detected: {}", version.trim());
             }
             Ok(_) => {

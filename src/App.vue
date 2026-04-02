@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import Sidebar from '@/components/Sidebar.vue'
 import GatewayStatusBar from '@/components/GatewayStatusBar.vue'
+import HITLBar from '@/components/HITLBar.vue'
 import { useAgentStore } from '@/stores/agents'
 import { useSettingsStore } from '@/stores/settings'
+import { useProxyStore } from '@/stores/proxy'
 import { invoke } from '@tauri-apps/api/core'
 import { onMounted, ref, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
@@ -11,6 +13,7 @@ const router = useRouter()
 const route = useRoute()
 const agentStore = useAgentStore()
 const settingsStore = useSettingsStore()
+const proxyStore = useProxyStore()
 const isReady = ref(false)
 
 // Check if we're on a page that needs the sidebar
@@ -32,6 +35,8 @@ async function checkAndSetup() {
     // Redirect to setup if not fully configured and not already on setup page
     if (needsSetup && route.name !== 'setup') {
       router.replace('/setup')
+    } else if (!needsSetup) {
+      await invoke('configure_openclaw_proxy', { proxyPort: 18788 })
     }
     isReady.value = true
   } catch (e) {
@@ -44,6 +49,9 @@ async function checkAndSetup() {
 }
 
 onMounted(async () => {
+  // Initialize proxy store
+  proxyStore.init()
+
   // Initialize event listener for OpenClaw process events
   agentStore.initEventListener()
 
@@ -59,6 +67,9 @@ onMounted(async () => {
       router.replace('/setup')
       isReady.value = true
       return
+    } else if (!needsSetup) {
+      // Ensure local proxy is configured
+      await invoke('configure_openclaw_proxy', { proxyPort: 18788 })
     }
   } catch (e) {
     console.error('Failed to check environment:', e)
@@ -106,6 +117,7 @@ onMounted(async () => {
     <main class="main-content">
       <!-- Gateway Status Bar -->
       <GatewayStatusBar :compact="true" />
+      <HITLBar />
       
       <router-view v-slot="{ Component }">
         <transition name="fade" mode="out-in">
