@@ -7,6 +7,10 @@ use serde::{Deserialize, Serialize};
 /// Proxy 状态管理模块
 /// 管理代理服务器的运行时状态、费用统计、HITL 请求等
 
+/// HTTP Client 配置常量
+const HTTP_CONNECT_TIMEOUT_SECS: u64 = 30;
+const HTTP_REQUEST_TIMEOUT_SECS: u64 = 120;
+
 /// HITL (Human-In-The-Loop) 请求结构
 #[derive(Debug)]
 pub struct HitlRequest {
@@ -129,11 +133,21 @@ pub struct ProxyState {
     pub action_step: Arc<std::sync::atomic::AtomicU32>,
     /// 熔断状态
     pub circuit_broken: Arc<std::sync::atomic::AtomicBool>,
+    /// HTTP Client (复用连接池)
+    pub http_client: reqwest::Client,
 }
 
 impl ProxyState {
     /// 创建新的代理状态
     pub fn new(config: ProxyConfig, event_sender: mpsc::Sender<ProxyEvent>) -> Self {
+        // 创建复用的 HTTP Client (带连接池)
+        let http_client = reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(HTTP_CONNECT_TIMEOUT_SECS))
+            .timeout(std::time::Duration::from_secs(HTTP_REQUEST_TIMEOUT_SECS))
+            .pool_max_idle_per_host(8)  // 每个 host 最多 8 个空闲连接
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
+        
         Self {
             port: Arc::new(std::sync::atomic::AtomicU16::new(config.port)),
             running: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -145,6 +159,7 @@ impl ProxyState {
             thinking_step: Arc::new(std::sync::atomic::AtomicU32::new(0)),
             action_step: Arc::new(std::sync::atomic::AtomicU32::new(0)),
             circuit_broken: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            http_client,
         }
     }
 
@@ -156,8 +171,21 @@ impl ProxyState {
         // 检查是否超过预算
         let limit = self.budget_limit.load(std::sync::atomic::Ordering::Relaxed);
         if new_total > limit {
+            // 同步触发熔断（不在 add_cost 中 spawn，避免 Tokio runtime 依赖）
+            self.circuit_broken.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
+    /// 异步增加费用 (用于实际运行时，会发送事件)
+    pub async fn add_cost_async(&self, cost: f64) {
+        let cost_i64 = (cost * 10000.0) as i64;
+        let new_total = self.total_cost.fetch_add(cost_i64, std::sync::atomic::Ordering::Relaxed) + cost_i64;
+        
+        // 检查是否超过预算
+        let limit = self.budget_limit.load(std::sync::atomic::Ordering::Relaxed);
+        if new_total > limit {
             self.trigger_circuit_breaker(format!("Budget exceeded: ${:.2} > ${:.2}", 
-                new_total as f64 / 10000.0, limit as f64 / 10000.0));
+                new_total as f64 / 10000.0, limit as f64 / 10000.0)).await;
         }
     }
 
@@ -171,8 +199,8 @@ impl ProxyState {
         self.total_cost.load(std::sync::atomic::Ordering::Relaxed) as f64 / 10000.0
     }
 
-    /// 触发熔断
-    pub fn trigger_circuit_breaker(&self, reason: String) {
+    /// 触发熔断 (异步版本)
+    pub async fn trigger_circuit_breaker(&self, reason: String) {
         self.circuit_broken.store(true, std::sync::atomic::Ordering::Relaxed);
         
         let current_cost = self.get_current_cost();
@@ -184,11 +212,8 @@ impl ProxyState {
             limit,
         };
         
-        // 异步发送事件，不阻塞
-        let sender = self.event_sender.clone();
-        tokio::spawn(async move {
-            let _ = sender.send(event).await;
-        });
+        // 发送事件
+        let _ = self.event_sender.send(event).await;
     }
 
     /// 重置熔断
@@ -274,4 +299,27 @@ pub fn calculate_cost(model: &str, input_tokens: u32, output_tokens: u32, image_
     let image_cost = (image_tokens as f64) / 1_000_000.0 * pricing.input_price_per_m; // 图片按输入计费
     
     input_cost + output_cost + image_cost
+}
+
+/// 高危工具列表
+const DANGEROUS_TOOLS: &[&str] = &[
+    "bash",
+    "str_replace_editor",
+    "str_replace",
+    "execute_script",
+    "script",
+    "run_command",
+    "file_write",
+    "write_file",
+    "create_file",
+    "delete_file",
+    "rm",
+    "sudo",
+    "chmod",
+    "chown",
+];
+
+/// 检测是否为高危工具
+pub fn is_dangerous_tool(tool_name: &str) -> bool {
+    DANGEROUS_TOOLS.iter().any(|&d| tool_name.to_lowercase().contains(d))
 }

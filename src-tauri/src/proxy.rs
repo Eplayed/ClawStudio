@@ -12,7 +12,7 @@ use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 use std::time::Duration;
 
-use crate::proxy_state::{ProxyConfig, ProxyEvent, ProxyState};
+use crate::proxy_state::{ProxyConfig, ProxyEvent, ProxyState, is_dangerous_tool};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 /// 代理服务器核心模块
@@ -188,21 +188,7 @@ async fn handle_request(
     }
 }
 
-const DANGEROUS_TOOLS: &[&str] = &[
-    "bash",
-    "str_replace_editor", 
-    "str_replace",
-    "execute_script",
-    "script",
-    "run_command",
-    "file_write", 
-    "write_file",
-    "create_file",
-];
-
-fn is_dangerous_tool(tool_name: &str) -> bool {
-    DANGEROUS_TOOLS.iter().any(|&d| tool_name.contains(d))
-}
+// is_dangerous_tool 已移动到 proxy_state.rs，使用 proxy_state::is_dangerous_tool
 
 fn construct_rejection_response(tool: &str, error_message: &str) -> String {
     serde_json::json!({
@@ -266,7 +252,7 @@ async fn handle_anthropic_messages(
     let config = state.config.lock().await.clone();
     let api_key = get_api_key().await.unwrap_or_default();
     
-    match forward_to_anthropic(&body, &model, &api_key, &config).await {
+    match forward_to_anthropic(&state.http_client, &body, &model, &api_key, &config).await {
         Ok(response) => {
             // 解析响应
             let response_json: serde_json::Value = match serde_json::from_slice(&response) {
@@ -475,7 +461,7 @@ async fn handle_openai_chat(
     let config = state.config.lock().await.clone();
     let api_key = get_api_key().await.unwrap_or_default();
     
-    match forward_to_openai(&body, &model, &api_key, &config).await {
+    match forward_to_openai(&state.http_client, &body, &model, &api_key, &config).await {
         Ok(response) => {
             // 解析并提取使用量
             if let Ok(response_json) = serde_json::from_slice::<serde_json::Value>(&response) {
@@ -511,12 +497,12 @@ async fn handle_openai_chat(
 
 /// 转发请求到 Anthropic API
 async fn forward_to_anthropic(
+    client: &reqwest::Client,
     body: &Bytes,
     _model: &str,
     api_key: &str,
     config: &ProxyConfig,
 ) -> Result<Bytes, String> {
-    let client = reqwest::Client::new();
     let target_url = format!("{}/v1/messages", config.target_url);
     
     let response = client
@@ -525,7 +511,6 @@ async fn forward_to_anthropic(
         .header("x-api-key", api_key)
         .header("anthropic-version", "2023-06-01")
         .body(body.clone())
-        .timeout(Duration::from_secs(config.request_timeout_secs))
         .send()
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
@@ -541,13 +526,12 @@ async fn forward_to_anthropic(
     
 /// 转发请求到 OpenAI API
 async fn forward_to_openai(
+    client: &reqwest::Client,
     body: &Bytes,
     _model: &str,
     api_key: &str,
     config: &ProxyConfig,
 ) -> Result<Bytes, String> {
-    let client = reqwest::Client::new();
-    
     // 解析并修改模型名称
     let mut request_json: serde_json::Value = serde_json::from_slice(body).map_err(|e| e.to_string())?;
     if let Some(obj) = request_json.as_object_mut() {
@@ -840,7 +824,7 @@ pub async fn set_proxy_budget_limit(limit: f64, state: State<'_, ProxyServerStat
         
         // 如果设置后低于当前费用，自动触发熔断
         if proxy_state.get_current_cost() > limit {
-            proxy_state.trigger_circuit_breaker(format!("Budget limit lowered below current cost"));
+            proxy_state.trigger_circuit_breaker(format!("Budget limit lowered below current cost")).await;
         }
         
         Ok(format!("Budget limit set to ${:.2}", limit))
