@@ -195,30 +195,53 @@
 
       <!-- Step 6: Start Gateway -->
       <div v-if="currentStep === 6" class="step-panel">
-        <h2>🚀 Start OpenClaw Gateway</h2>
-        <p class="step-desc">Launch the OpenClaw Gateway service.</p>
-        
-        <div class="gateway-config">
-          <label>
-            Gateway Port:
-            <input v-model.number="gatewayPort" type="number" class="input-field port-input" />
-          </label>
-        </div>
-        
-        <div v-if="installProgress.step === 'start_gateway'" class="install-progress">
-          <div class="progress-bar">
-            <div class="progress-fill" :style="{ width: `${installProgress.percent}%` }"></div>
+        <h2>🚀 启动 OpenClaw 服务</h2>
+        <p class="step-desc">启动视控舱安全网关和 OpenClaw 核心引擎。</p>
+
+        <div class="service-status-grid">
+          <!-- Proxy Status -->
+          <div class="service-card" :class="proxyStatus">
+            <div class="service-header">
+              <span class="service-icon">🛡️</span>
+              <span class="service-title">视控舱安全网关</span>
+            </div>
+            <div class="service-port">Port: 18788</div>
+            <div class="service-status-indicator">
+              <span v-if="proxyStatus === 'pending'" class="status-pending">⏳ 等待启动</span>
+              <span v-else-if="proxyStatus === 'starting'" class="status-starting">🔄 启动中...</span>
+              <span v-else-if="proxyStatus === 'running'" class="status-running">✅ 运行中</span>
+              <span v-else-if="proxyStatus === 'failed'" class="status-failed">❌ 失败</span>
+            </div>
           </div>
-          <div class="progress-message">{{ installProgress.message }}</div>
+
+          <!-- Gateway Status -->
+          <div class="service-card" :class="gatewayStatus">
+            <div class="service-header">
+              <span class="service-icon">🦞</span>
+              <span class="service-title">OpenClaw 核心引擎</span>
+            </div>
+            <div class="service-port">Port: 18789</div>
+            <div class="service-status-indicator">
+              <span v-if="gatewayStatus === 'pending'" class="status-pending">⏳ 等待启动</span>
+              <span v-else-if="gatewayStatus === 'starting'" class="status-starting">🔄 启动中...</span>
+              <span v-else-if="gatewayStatus === 'running'" class="status-running">✅ 运行中</span>
+              <span v-else-if="gatewayStatus === 'failed'" class="status-failed">❌ 失败</span>
+            </div>
+          </div>
         </div>
-        
+
+        <!-- Startup progress message -->
+        <div v-if="startupMessage" class="startup-message">
+          {{ startupMessage }}
+        </div>
+
         <div v-if="gatewayStarted" class="success-message">
-          🎉 OpenClaw Gateway is running on port {{ gatewayPort }}
+          🎉 OpenClaw 服务已全部启动！正在跳转到主页...
         </div>
-        
+
         <div class="step-actions">
           <button @click="startGateway" class="btn-primary btn-large" :disabled="isInstalling || gatewayStarted">
-            {{ gatewayStarted ? '✅ Gateway Running' : '🚀 Start Gateway' }}
+            {{ gatewayStarted ? '✅ 服务运行中' : '🚀 启动服务' }}
           </button>
         </div>
       </div>
@@ -263,12 +286,18 @@ const isTesting = ref(false)
 const useMirror = ref(false)
 const gatewayStarted = ref(false)
 
-// Environment check
+// Gateway startup status
+type ServiceStatus = 'pending' | 'starting' | 'running' | 'failed'
+const proxyStatus = ref<ServiceStatus>('pending')
+const gatewayStatus = ref<ServiceStatus>('pending')
+const startupMessage = ref('')
+
+// Environment check - use nested key paths for backend structure
 const envItems = ref([
-  { name: 'Node.js', key: 'node_installed', version_key: 'node_version', status: 'checking', version: '' },
-  { name: 'npm', key: 'npm_installed', version_key: 'npm_version', status: 'checking', version: '' },
-  { name: 'OpenClaw', key: 'openclaw_installed', version_key: 'openclaw_version', status: 'checking', version: '' },
-  { name: 'Gateway', key: 'gateway_running', version_key: 'gateway_port', status: 'checking', version: '' },
+  { name: 'Node.js', key: 'node.installed', version_key: 'node.version', status: 'checking', version: '' },
+  { name: 'npm', key: 'npm.installed', version_key: 'npm.version', status: 'checking', version: '' },
+  { name: 'OpenClaw', key: 'openclaw.installed', version_key: 'openclaw.version', status: 'checking', version: '' },
+  { name: 'Gateway', key: 'gateway.running', version_key: 'gateway.port', status: 'checking', version: '' },
 ])
 
 // API configuration
@@ -317,6 +346,11 @@ onMounted(async () => {
   await checkEnvironment()
 })
 
+// Helper to get nested property from object using dot notation
+function getNestedValue(obj: any, path: string): any {
+  return path.split('.').reduce((acc, key) => acc?.[key], obj)
+}
+
 async function checkEnvironment() {
   isChecking.value = true
   
@@ -325,20 +359,24 @@ async function checkEnvironment() {
     
     envItems.value = envItems.value.map(item => ({
       ...item,
-      status: env[item.key] ? 'ok' : 'missing',
-      version: env[item.version_key] || '',
+      status: getNestedValue(env, item.key) ? 'ok' : 'missing',
+      version: getNestedValue(env, item.version_key) || '',
     }))
     
     // Skip to appropriate step based on what's installed
-    if (env.node_installed && env.openclaw_installed) {
-      if (env.gateway_running) {
+    const nodeInstalled = getNestedValue(env, 'node.installed')
+    const openclawInstalled = getNestedValue(env, 'openclaw.installed')
+    const gatewayRunning = getNestedValue(env, 'gateway.running')
+    
+    if (nodeInstalled && openclawInstalled) {
+      if (gatewayRunning) {
         // Everything is ready, go to dashboard
         router.push('/')
       } else {
         // Skip to gateway step
         currentStep.value = 6
       }
-    } else if (env.node_installed) {
+    } else if (nodeInstalled) {
       currentStep.value = 2 // OpenClaw installation
     }
   } catch (error) {
@@ -423,19 +461,50 @@ async function saveApiKey() {
 
 async function startGateway() {
   isInstalling.value = true
-  installProgress.value = { step: 'start_gateway', percent: 0, message: 'Starting...', log_line: '' }
-  
+  proxyStatus.value = 'pending'
+  gatewayStatus.value = 'pending'
+  startupMessage.value = ''
+
   try {
-    await invoke('start_gateway_from_setup', { port: gatewayPort.value })
+    // Step 1: Configure OpenClaw proxy (hijack API Base URL to 18788)
+    startupMessage.value = '正在配置视控舱安全网关...'
+    proxyStatus.value = 'starting'
+    
+    await invoke('configure_openclaw_proxy', { proxyPort: 18788 })
+    
+    // Step 2: Start proxy on port 18788
+    startupMessage.value = '正在启动视控舱安全网关 (Port 18788)...'
+    await invoke('start_proxy', { port: 18788 })
+    
+    // Wait 1 second to confirm proxy is running
+    await new Promise(resolve => setTimeout(resolve, 1000))
+    proxyStatus.value = 'running'
+    
+    // Step 3: Start Gateway on port 18789
+    startupMessage.value = '正在启动 OpenClaw 核心引擎 (Port 18789)...'
+    gatewayStatus.value = 'starting'
+    
+    await invoke('start_gateway', { port: 18789 })
+    gatewayStatus.value = 'running'
+    
     gatewayStarted.value = true
+    startupMessage.value = '所有服务已成功启动！'
     
     // Wait a moment then go to dashboard
     setTimeout(() => {
       router.push('/')
     }, 2000)
   } catch (error) {
-    console.error('Failed to start gateway:', error)
-    installProgress.value.message = `Failed: ${error}`
+    console.error('Failed to start services:', error)
+    
+    // Update failed status based on which step failed
+    if (proxyStatus.value === 'starting') {
+      proxyStatus.value = 'failed'
+      startupMessage.value = `视控舱安全网关启动失败: ${error}`
+    } else if (gatewayStatus.value === 'starting') {
+      gatewayStatus.value = 'failed'
+      startupMessage.value = `OpenClaw 核心引擎启动失败: ${error}`
+    }
   } finally {
     isInstalling.value = false
   }
@@ -784,6 +853,96 @@ async function connectChannel(channelId: string) {
 
 .port-input {
   width: 100px;
+}
+
+.service-status-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.service-card {
+  padding: 1.5rem;
+  background: rgba(255, 255, 255, 0.05);
+  border: 2px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  text-align: center;
+  transition: all 0.3s ease;
+}
+
+.service-card.pending {
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.service-card.starting {
+  border-color: rgba(59, 130, 246, 0.5);
+  background: rgba(59, 130, 246, 0.1);
+}
+
+.service-card.running {
+  border-color: rgba(34, 197, 94, 0.5);
+  background: rgba(34, 197, 94, 0.1);
+}
+
+.service-card.failed {
+  border-color: rgba(239, 68, 68, 0.5);
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.service-header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.service-icon {
+  font-size: 1.5rem;
+}
+
+.service-title {
+  font-weight: 500;
+  font-size: 1rem;
+}
+
+.service-port {
+  font-size: 0.875rem;
+  color: #888;
+  margin-bottom: 0.75rem;
+}
+
+.service-status-indicator {
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.status-pending {
+  color: #888;
+}
+
+.status-starting {
+  color: #3b82f6;
+}
+
+.status-running {
+  color: #22c55e;
+}
+
+.status-failed {
+  color: #ef4444;
+}
+
+.startup-message {
+  padding: 0.75rem 1rem;
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: 8px;
+  color: #60a5fa;
+  text-align: center;
+  margin: 1rem 0;
+  font-size: 0.875rem;
 }
 
 .success-message {
