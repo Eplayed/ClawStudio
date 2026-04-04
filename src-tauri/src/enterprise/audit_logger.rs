@@ -77,6 +77,7 @@ pub trait AuditLogger: Send + Sync {
 
 /// Local file-based audit logger (Community Edition)
 pub struct LocalAuditLogger {
+    #[allow(dead_code)]
     db_path: String,
 }
 
@@ -96,12 +97,12 @@ impl AuditLogger for LocalAuditLogger {
         Ok(entry.id.clone())
     }
     
-    async fn get_entries(&self, filter: AuditFilter) -> Result<Vec<AuditEntry>, String> {
+    async fn get_entries(&self, _filter: AuditFilter) -> Result<Vec<AuditEntry>, String> {
         // CE: Query local SQLite
         Ok(vec![])
     }
     
-    async fn export(&self, format: ExportFormat) -> Result<Vec<u8>, String> {
+    async fn export(&self, _format: ExportFormat) -> Result<Vec<u8>, String> {
         // CE: Export to JSON/CSV
         Ok(vec![])
     }

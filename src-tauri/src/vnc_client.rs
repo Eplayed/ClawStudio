@@ -1,18 +1,8 @@
 // vnc_client.rs - VNC Screenshot Client
 // Connects to noVNC WebSocket and captures screenshots
 
-use tokio_tungstenite::{connect_async, tungstenite::Message};
-use futures_util::SinkExt;
+use tokio_tungstenite::connect_async;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
-use tokio::sync::RwLock;
-
-// ─── VNC Protocol Constants ───
-
-const VNC_FRAMEBUFFER_UPDATE: u8 = 3;
-const VNC_SET_PIXEL_FORMAT: u8 = 0;
-const VNC_SET_ENCODINGS: u8 = 2;
-const VNC_FRAME_BUFFER_REQUEST: u8 = 3;
 
 // ─── VNC Client ───
 
@@ -44,7 +34,7 @@ impl VNCClient {
         // For now, we'll use a simpler approach:
         // Connect to noVNC's WebSocket endpoint
         match connect_async(&self.url).await {
-            Ok((ws_stream, _)) => {
+            Ok((_ws_stream, _)) => {
                 log::info!("VNC WebSocket connected");
                 self.connected = true;
                 Ok(())

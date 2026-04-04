@@ -438,7 +438,7 @@ pub async fn gateway_status(
 }
 
 /// Cleanup Gateway process on app exit
-pub fn cleanup_on_exit(state: &GatewayState) {
+pub fn cleanup_on_exit(_state: &GatewayState) {
     // Try to stop the gateway
     let output = std::process::Command::new("openclaw")
         .args(["gateway", "stop"])

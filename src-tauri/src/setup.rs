@@ -222,6 +222,9 @@ pub async fn configure_openclaw(config: SetupConfig) -> Result<String, String> {
 #[tauri::command]
 pub async fn configure_openclaw_proxy(
     proxy_port: u16,
+    api_key: Option<String>,
+    auth_provider: Option<String>,
+    default_model: Option<String>,
 ) -> Result<(), String> {
     let config_path = dirs::home_dir()
         .map(|h| h.join(".openclaw").join("openclaw.json"))
@@ -249,6 +252,21 @@ pub async fn configure_openclaw_proxy(
         format!("http://127.0.0.1:{}/v1", proxy_port)
     );
     
+    // 如果提供了 api_key，写入配置
+    if let Some(ref key) = api_key {
+        config["agents"]["defaults"]["api_key"] = serde_json::json!(key);
+    }
+    
+    // 如果提供了 auth_provider，写入配置
+    if let Some(ref provider) = auth_provider {
+        config["agents"]["defaults"]["auth_provider"] = serde_json::json!(provider);
+    }
+    
+    // 如果提供了 default_model，写入配置
+    if let Some(ref model) = default_model {
+        config["agents"]["defaults"]["model"] = serde_json::json!(model);
+    }
+    
     // 写入配置
     if let Some(parent) = config_path.parent() {
         std::fs::create_dir_all(parent).ok();
@@ -256,6 +274,14 @@ pub async fn configure_openclaw_proxy(
     
     std::fs::write(&config_path, serde_json::to_string_pretty(&config).unwrap())
         .map_err(|e| format!("Failed to write config: {}", e))?;
+    
+    // 如果同时提供了 api_key 和 auth_provider，保存到 keychain
+    if let (Some(ref key), Some(ref provider)) = (&api_key, &auth_provider) {
+        let entry = keyring::Entry::new("clawstudio", provider)
+            .map_err(|e| format!("Failed to create keyring entry: {}", e))?;
+        entry.set_password(key).map_err(|e| format!("Failed to save to keychain: {}", e))?;
+        log::info!("API key saved to keychain for provider: {}", provider);
+    }
         
     Ok(())
 }

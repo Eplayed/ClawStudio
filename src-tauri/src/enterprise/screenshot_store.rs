@@ -38,7 +38,9 @@ pub trait ScreenshotStore: Send + Sync {
 
 /// Local screenshot store (Community Edition)
 pub struct LocalScreenshotStore {
+    #[allow(dead_code)]
     base_path: String,
+    #[allow(dead_code)]
     max_days: u32,
 }
 

@@ -3,7 +3,6 @@
 // EE: Cloud database (PostgreSQL / MySQL)
 
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
 
 /// Storage backend trait
 #[async_trait]
@@ -32,6 +31,7 @@ pub trait StorageBackend: Send + Sync {
 
 /// Local SQLite storage (Community Edition)
 pub struct LocalStorage {
+    #[allow(dead_code)]
     db_path: String,
 }
 

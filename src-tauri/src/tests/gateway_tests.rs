@@ -3,7 +3,6 @@
 #[cfg(test)]
 mod tests {
     use std::process::Command;
-    use std::time::Duration;
 
     #[test]
     fn test_gateway_status_structure() {

@@ -2,7 +2,6 @@
 mod tests {
     use crate::proxy_state::{calculate_cost, ProxyConfig, ProxyState, ProxyEvent, is_dangerous_tool};
     use tokio::sync::mpsc;
-    use std::sync::atomic::Ordering;
 
     // ========== 费用计算测试 ==========
 

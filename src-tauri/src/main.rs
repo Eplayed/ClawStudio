@@ -6,7 +6,6 @@
 // Import from lib
 use clawstudio_lib::*;
 
-use tauri::Manager;
 use gateway::GatewayState;
 use setup::SetupState;
 use audit::AuditManager;

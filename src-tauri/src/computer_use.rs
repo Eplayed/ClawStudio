@@ -137,7 +137,7 @@ impl CURuntime {
         vnc_port: u16,
         system_prompt: String,
         model: String,
-        api_key: String,
+        _api_key: String,
     ) -> Result<String, String> {
         let session_id = format!("cu-{}-{}", agent_id, chrono::Utc::now().timestamp());
 
@@ -147,7 +147,7 @@ impl CURuntime {
             .await?;
 
         // 2. Create initial message with screenshot
-        let mut messages = vec![CUMessage {
+        let messages = vec![CUMessage {
             role: "user".to_string(),
             content: vec![
                 CUContentBlock::Text {

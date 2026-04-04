@@ -13,7 +13,7 @@ use tokio::sync::mpsc;
 use std::time::Duration;
 
 use crate::proxy_state::{ProxyConfig, ProxyEvent, ProxyState, is_dangerous_tool};
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, State};
 
 /// 代理服务器核心模块
 /// 
