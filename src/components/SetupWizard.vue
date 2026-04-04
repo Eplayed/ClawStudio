@@ -2,13 +2,13 @@
 import { ref, onMounted, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
-import EnvDetector from './EnvDetector.vue'
-import NodeInstaller from './NodeInstaller.vue'
-import ClawInstaller from './ClawInstaller.vue'
-import ApiKeySetup from './ApiKeySetup.vue'
-import ModelSelector from './ModelSelector.vue'
-import ChannelSetup from './ChannelSetup.vue'
-import LaunchGateway from './LaunchGateway.vue'
+import EnvDetector from './setup/EnvDetector.vue'
+import NodeInstaller from './setup/NodeInstaller.vue'
+import ClawInstaller from './setup/ClawInstaller.vue'
+import ApiKeySetup from './setup/ApiKeySetup.vue'
+import ModelSelector from './setup/ModelSelector.vue'
+import ChannelSetup from './setup/ChannelSetup.vue'
+import LaunchGateway from './setup/LaunchGateway.vue'
 
 const currentStep = ref(1)
 const totalSteps = 7

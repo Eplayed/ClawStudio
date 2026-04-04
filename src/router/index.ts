@@ -6,7 +6,7 @@ const router = createRouter({
     {
       path: '/setup',
       name: 'setup',
-      component: () => import('@/views/SetupWizard.vue'),
+      component: () => import('@/components/SetupWizard.vue'),
       meta: { title: '安装向导', fullscreen: true },
     },
     {
